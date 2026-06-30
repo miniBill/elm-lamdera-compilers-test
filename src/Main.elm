@@ -1,15 +1,18 @@
 module Main exposing (run)
 
+import Ansi.Color
 import BackendTask exposing (BackendTask)
 import BackendTask.Do as Do
 import BackendTask.File as File
+import BackendTask.Glob as Glob
 import BackendTask.Http as Http
 import BackendTask.Stream as Stream
 import FatalError exposing (FatalError)
 import Json.Decode
 import Json.Encode
 import List.Extra
-import Pages.Script as Script exposing (Script)
+import Pages.Script as Script exposing (Script, makeDirectory)
+import Set
 import Tui
 import Tui.Effect as Effect exposing (Effect)
 import Tui.Screen as Screen exposing (Screen)
@@ -24,11 +27,21 @@ type Model
         , doing : List Package
         , todo : List Package
         }
+    | FatalError String
 
 
 type Msg
-    = GotPackageList (List Package)
-    | DownloadedPackage ( Package, Bool )
+    = GotPackageList (Result Http.Error (List Package))
+    | DownloadedPackage (Result DownloadError ( Package, Bool ))
+
+
+type DownloadError
+    = FailedToRemoveDirectory String
+    | FailedToRemoveFile String
+    | FailedToMakeDirectory String
+    | FailedToExecute String (List String)
+    | FailedToStatFile String
+    | DownloadedEmptyFile String String
 
 
 type alias Package =
@@ -55,13 +68,25 @@ run =
         |> Tui.toScript
 
 
-update : Msg -> Model -> ( Model, Effect.Effect Msg )
+update : Msg -> Model -> ( Model, Effect Msg )
 update msg model =
     case msg of
-        GotPackageList packages ->
-            { todo = packages, doing = [], done = [] } |> fillQueue
+        GotPackageList (Err e) ->
+            ( FatalError (Debug.toString e), Effect.none )
 
-        DownloadedPackage (( package, _ ) as pair) ->
+        GotPackageList (Ok packages) ->
+            { todo =
+                packages
+                    |> List.Extra.removeWhen (\package -> package.author == "Skinney")
+            , doing = []
+            , done = []
+            }
+                |> fillQueue
+
+        DownloadedPackage (Err e) ->
+            ( FatalError (Debug.toString e), Effect.none )
+
+        DownloadedPackage (Ok (( package, _ ) as pair)) ->
             case model of
                 DownloadingPackages inner ->
                     { doing = List.Extra.remove package inner.doing
@@ -79,7 +104,7 @@ fillQueue :
     , done : List ( Package, Bool )
     , todo : List Package
     }
-    -> ( Model, Effect.Effect Msg )
+    -> ( Model, Effect Msg )
 fillQueue ({ todo, doing, done } as data) =
     let
         toAddCount : Int
@@ -100,7 +125,7 @@ fillQueue ({ todo, doing, done } as data) =
             , done = done
             }
         , toAdd
-            |> List.map (\package -> Effect.perform DownloadedPackage (downloadPackage package))
+            |> List.map (\package -> Effect.attempt DownloadedPackage (downloadPackage package))
             |> Effect.batch
         )
 
@@ -108,42 +133,44 @@ fillQueue ({ todo, doing, done } as data) =
 getPackageList : Effect Msg
 getPackageList =
     Http.get "https://package.elm-lang.org/search.json"
-        (Http.expectJson
-            (Json.Decode.list
-                (Json.Decode.map2
-                    (\( author, name ) version ->
-                        { author = author
-                        , name = name
-                        , version = version
-                        }
-                    )
-                    (Json.Decode.field "name"
-                        (Json.Decode.string
-                            |> Json.Decode.andThen
-                                (\raw ->
-                                    case String.split "/" raw of
-                                        [ author, name ] ->
-                                            Json.Decode.succeed ( author, name )
+        (Http.expectJson packageListDecoder)
+        |> BackendTask.mapError .recoverable
+        |> Effect.attempt GotPackageList
 
-                                        _ ->
-                                            let
-                                                msg : String
-                                                msg =
-                                                    "Could not split package author and name in " ++ Json.Encode.encode 0 (Json.Encode.string raw)
-                                            in
-                                            Json.Decode.fail msg
-                                )
+
+packageListDecoder : Json.Decode.Decoder (List Package)
+packageListDecoder =
+    Json.Decode.list
+        (Json.Decode.map2
+            (\( author, name ) version ->
+                { author = author
+                , name = name
+                , version = version
+                }
+            )
+            (Json.Decode.field "name"
+                (Json.Decode.string
+                    |> Json.Decode.andThen
+                        (\raw ->
+                            case String.split "/" raw of
+                                [ author, name ] ->
+                                    Json.Decode.succeed ( author, name )
+
+                                _ ->
+                                    let
+                                        msg : String
+                                        msg =
+                                            "Could not split package author and name in " ++ Json.Encode.encode 0 (Json.Encode.string raw)
+                                    in
+                                    Json.Decode.fail msg
                         )
-                    )
-                    (Json.Decode.field "version" Json.Decode.string)
                 )
             )
+            (Json.Decode.field "version" Json.Decode.string)
         )
-        |> BackendTask.allowFatal
-        |> Effect.perform GotPackageList
 
 
-downloadPackage : Package -> BackendTask FatalError ( Package, Bool )
+downloadPackage : Package -> BackendTask DownloadError ( Package, Bool )
 downloadPackage package =
     let
         targetFolder : String
@@ -168,7 +195,7 @@ downloadPackage package =
     BackendTask.succeed ( package, hasTests )
 
 
-doDownloadPackage : Package -> BackendTask FatalError ()
+doDownloadPackage : Package -> BackendTask DownloadError ()
 doDownloadPackage package =
     let
         url : String
@@ -230,37 +257,63 @@ doDownloadPackage package =
                 ++ List.map
                     (\file -> package.name ++ "-" ++ package.version ++ "/" ++ file)
                     files
+
+        removeDirectoryRecursive : String -> BackendTask DownloadError ()
+        removeDirectoryRecursive dir =
+            Script.removeDirectory { recursive = True } dir
+                |> BackendTask.mapError (\_ -> FailedToRemoveDirectory dir)
+
+        removeFile : String -> BackendTask DownloadError ()
+        removeFile file =
+            Script.removeFile file
+                |> BackendTask.mapError (\_ -> FailedToRemoveFile file)
+
+        makeDirectoryRecursive : String -> BackendTask DownloadError ()
+        makeDirectoryRecursive dir =
+            Script.makeDirectory { recursive = True } dir
+                |> BackendTask.mapError (\_ -> FailedToMakeDirectory dir)
+
+        exec : String -> List String -> BackendTask DownloadError ()
+        exec cmd args =
+            Script.exec cmd args
+                |> BackendTask.mapError (\_ -> FailedToExecute cmd args)
+
+        stat : String -> BackendTask DownloadError Glob.FileStats
+        stat file =
+            Glob.succeed identity
+                |> Glob.match (Glob.literal file)
+                |> Glob.captureStats
+                |> Glob.expectUniqueMatch
+                |> BackendTask.mapError (\_ -> FailedToStatFile file)
     in
-    Do.do (Script.removeDirectory { recursive = True } tmpFolder) <| \_ ->
-    Do.do (Script.removeFile filename) <| \_ ->
-    Do.do (Script.makeDirectory { recursive = True } tmpFolder) <| \_ ->
-    Do.do (execWithLogging "curl" [ url, "--remove-on-error", "-o", filename ]) <| \_ ->
-    Do.do (Script.makeDirectory { recursive = True } tmpFolder) <| \_ ->
-    Do.do (execWithLogging "tar" (tarArgs [ "elm.json", "src" ])) <| \_ ->
-    Do.do
-        (execWithLogging "tar" (tarArgs [ "tests" ])
-            -- Ignore errors here
-            |> BackendTask.toResult
-        )
-    <| \_ ->
-    Do.do (Script.makeDirectory { recursive = True } targetFolderContainer) <| \_ ->
-    Do.exec "mv" [ tmpFolder, targetFolder ] <| \_ ->
-    Do.noop
+    Do.do (removeDirectoryRecursive tmpFolder) <| \_ ->
+    Do.do (removeFile filename) <| \_ ->
+    Do.do (makeDirectoryRecursive tmpFolder) <| \_ ->
+    Do.do (exec "curl" [ url, "--remove-on-error", "-o", filename ]) <| \_ ->
+    Do.do (stat filename) <| \filenameStats ->
+    if filenameStats.sizeInBytes == 0 then
+        BackendTask.fail (DownloadedEmptyFile url filename)
 
-
-execWithLogging : String -> List String -> BackendTask FatalError ()
-execWithLogging cmd args =
-    Script.exec cmd args
-        |> BackendTask.onError
-            (\e ->
-                Do.log (String.join " " (cmd :: args)) <| \_ ->
-                BackendTask.fail e
+    else
+        Do.do (makeDirectoryRecursive tmpFolder) <| \_ ->
+        Do.do (exec "tar" (tarArgs [ "elm.json", "src" ])) <| \_ ->
+        Do.do
+            (exec "tar" (tarArgs [ "tests" ])
+                -- Ignore errors here
+                |> BackendTask.toResult
             )
+        <| \_ ->
+        Do.do (makeDirectoryRecursive targetFolderContainer) <| \_ ->
+        Do.do (exec "mv" [ tmpFolder, targetFolder ]) <| \_ ->
+        Do.noop
 
 
 view : Tui.Context -> Model -> Screen
 view { width, height, colorProfile } model =
     case model of
+        FatalError err ->
+            Screen.fg Ansi.Color.red (Screen.text err)
+
         GettingPackageList ->
             Screen.text (icons.running ++ " Getting package list")
 
