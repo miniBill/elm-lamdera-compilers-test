@@ -393,28 +393,10 @@ view { width, height, colorProfile } model =
                 toLines : String -> List Package -> List Screen
                 toLines label list =
                     list
-                        |> List.sortBy packageToString
-                        |> List.map (\l -> Screen.text (label ++ " " ++ packageToString l))
-
-                toLinesDone : String -> List ( Package, Bool ) -> List Screen
-                toLinesDone label list =
-                    list
-                        |> List.sortBy (\( package, _ ) -> packageToString package)
-                        |> List.map
-                            (\( package, hasTests ) ->
-                                Screen.text
-                                    (label
-                                        ++ " "
-                                        ++ packageToString package
-                                        ++ " "
-                                        ++ (if hasTests then
-                                                "has tests"
-
-                                            else
-                                                "no tests"
-                                           )
-                                    )
-                            )
+                        |> List.Extra.gatherEqualsBy (\p -> [ p.author, p.name ])
+                        |> List.sortBy (\( h, _ ) -> packageToString h)
+                        |> List.map (\( h, t ) -> { author = h.author, name = h.name, versions = h.version :: List.map .version t })
+                        |> List.map (\l -> Screen.text (label ++ " " ++ packagesToString l))
 
                 minDoneHeight : Int
                 minDoneHeight =
@@ -427,7 +409,7 @@ view { width, height, colorProfile } model =
                 ( todoColumn, doneColumn ) =
                     mapLonger Tuple.pair
                         (toLines icons.waiting todo)
-                        (toLinesDone icons.done done)
+                        (toLines icons.done (List.map Tuple.first done))
                         |> List.take (height - 1 - doingLines)
                         |> List.unzip
                         |> Tuple.mapBoth
@@ -452,6 +434,11 @@ view { width, height, colorProfile } model =
             )
                 |> List.take height
                 |> Screen.lines
+
+
+packagesToString : { author : String, name : String, versions : List String } -> String
+packagesToString { author, name, versions } =
+    author ++ "/" ++ name ++ " " ++ String.join " " versions
 
 
 mapLonger : (Maybe a -> Maybe b -> p) -> List a -> List b -> List p
