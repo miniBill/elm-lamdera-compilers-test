@@ -26,13 +26,14 @@ type Model
         { done : List ( Package, Bool )
         , doing : List Package
         , todo : List Package
+        , failed : List Package
         }
     | FatalError String
 
 
 type Msg
     = GotPackageList (Result Http.Error (List Package))
-    | DownloadedPackage (Result DownloadError ( Package, Bool ))
+    | DownloadedPackage Package (Result DownloadError Bool)
 
 
 type DownloadError
@@ -77,21 +78,40 @@ update msg model =
         GotPackageList (Ok packages) ->
             { todo =
                 packages
-                    |> List.Extra.removeWhen (\package -> package.author == "Skinney")
+                    |> List.Extra.removeWhen
+                        (\package ->
+                            List.member package.author
+                                [ "Skinney"
+                                , "pdandy"
+                                , "ryanhg"
+                                ]
+                        )
             , doing = []
             , done = []
+            , failed = []
             }
                 |> fillQueue
 
-        DownloadedPackage (Err e) ->
-            ( FatalError (Debug.toString e), Effect.none )
-
-        DownloadedPackage (Ok (( package, _ ) as pair)) ->
+        DownloadedPackage package (Err e) ->
             case model of
                 DownloadingPackages inner ->
                     { doing = List.Extra.remove package inner.doing
-                    , done = pair :: inner.done
+                    , done = inner.done
                     , todo = inner.todo
+                    , failed = package :: inner.failed
+                    }
+                        |> fillQueue
+
+                _ ->
+                    ( model, Effect.none )
+
+        DownloadedPackage package (Ok hasTests) ->
+            case model of
+                DownloadingPackages inner ->
+                    { doing = List.Extra.remove package inner.doing
+                    , done = ( package, hasTests ) :: inner.done
+                    , todo = inner.todo
+                    , failed = inner.failed
                     }
                         |> fillQueue
 
@@ -103,9 +123,10 @@ fillQueue :
     { doing : List Package
     , done : List ( Package, Bool )
     , todo : List Package
+    , failed : List Package
     }
     -> ( Model, Effect Msg )
-fillQueue ({ todo, doing, done } as data) =
+fillQueue ({ todo, doing, done, failed } as data) =
     let
         toAddCount : Int
         toAddCount =
@@ -123,9 +144,10 @@ fillQueue ({ todo, doing, done } as data) =
             { todo = newTodo
             , doing = doing ++ toAdd
             , done = done
+            , failed = failed
             }
         , toAdd
-            |> List.map (\package -> Effect.attempt DownloadedPackage (downloadPackage package))
+            |> List.map (\package -> Effect.attempt (DownloadedPackage package) (downloadPackage package))
             |> Effect.batch
         )
 
@@ -170,7 +192,7 @@ packageListDecoder =
         )
 
 
-downloadPackage : Package -> BackendTask DownloadError ( Package, Bool )
+downloadPackage : Package -> BackendTask DownloadError Bool
 downloadPackage package =
     let
         targetFolder : String
@@ -191,8 +213,7 @@ downloadPackage package =
             doDownloadPackage package
         )
     <| \_ ->
-    Do.do (File.exists (targetFolder ++ "/test")) <| \hasTests ->
-    BackendTask.succeed ( package, hasTests )
+    File.exists (targetFolder ++ "/test")
 
 
 doDownloadPackage : Package -> BackendTask DownloadError ()
