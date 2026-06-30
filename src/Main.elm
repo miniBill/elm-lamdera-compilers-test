@@ -13,6 +13,7 @@ import Json.Encode
 import List.Extra
 import Pages.Script as Script exposing (Script, makeDirectory)
 import Set
+import Time
 import Tui
 import Tui.Effect as Effect exposing (Effect)
 import Tui.Screen as Screen exposing (Screen)
@@ -34,6 +35,7 @@ type Model
 type Msg
     = GotPackageList (Result Http.Error (List Package))
     | DownloadedPackage Package (Result DownloadError Bool)
+    | Tick Time.Posix
 
 
 type DownloadError
@@ -77,41 +79,56 @@ update msg model =
             ( FatalError (Debug.toString e), Effect.none )
 
         GotPackageList (Ok packages) ->
-            { todo =
-                packages
-                    |> List.Extra.removeWhen
-                        (\package ->
-                            -- 404
-                            package.author == "quietgarden"
-                        )
-            , doing = []
-            , done = []
-            , failed = []
-            }
-                |> fillQueue
+            ( DownloadingPackages
+                { todo =
+                    packages
+                        |> List.Extra.removeWhen
+                            (\package ->
+                                -- 404
+                                package.author == "quietgarden"
+                            )
+                        |> List.sortBy packageToString
+                , doing = []
+                , done = []
+                , failed = []
+                }
+            , Effect.none
+            )
 
         DownloadedPackage package (Err e) ->
-            -- case model of
-            --     DownloadingPackages inner ->
-            --         { doing = List.Extra.remove package inner.doing
-            --         , done = inner.done
-            --         , todo = inner.todo
-            --         , failed = package :: inner.failed
-            --         }
-            --             |> fillQueue
-            --     _ ->
-            --         ( model, Effect.none )
-            ( FatalError (Debug.toString e), Effect.none )
+            case model of
+                DownloadingPackages inner ->
+                    ( DownloadingPackages
+                        { doing = List.Extra.remove package inner.doing
+                        , done = inner.done
+                        , todo = inner.todo
+                        , failed = package :: inner.failed
+                        }
+                    , Effect.none
+                    )
+
+                _ ->
+                    ( model, Effect.none )
 
         DownloadedPackage package (Ok hasTests) ->
             case model of
                 DownloadingPackages inner ->
-                    { doing = List.Extra.remove package inner.doing
-                    , done = ( package, hasTests ) :: inner.done
-                    , todo = inner.todo
-                    , failed = inner.failed
-                    }
-                        |> fillQueue
+                    ( DownloadingPackages
+                        { doing = List.Extra.remove package inner.doing
+                        , done = ( package, hasTests ) :: inner.done
+                        , todo = inner.todo
+                        , failed = inner.failed
+                        }
+                    , Effect.none
+                    )
+
+                _ ->
+                    ( model, Effect.none )
+
+        Tick _ ->
+            case model of
+                DownloadingPackages inner ->
+                    inner |> fillQueue
 
                 _ ->
                     ( model, Effect.none )
@@ -480,5 +497,5 @@ packageToString package =
 
 
 subscriptions : Model -> Tui.Sub.Sub Msg
-subscriptions _ =
-    Tui.Sub.none
+subscriptions model =
+    Tui.Sub.everyMillis 100 Tick
