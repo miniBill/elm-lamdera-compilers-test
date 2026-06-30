@@ -20,7 +20,7 @@ import Url.Builder
 type Model
     = GettingPackageList
     | DownloadingPackages
-        { done : List Package
+        { done : List ( Package, Bool )
         , doing : List Package
         , todo : List Package
         }
@@ -28,7 +28,7 @@ type Model
 
 type Msg
     = GotPackageList (List Package)
-    | DownloadedPackage Package
+    | DownloadedPackage ( Package, Bool )
 
 
 type alias Package =
@@ -61,11 +61,11 @@ update msg model =
         GotPackageList packages ->
             { todo = packages, doing = [], done = [] } |> fillQueue
 
-        DownloadedPackage package ->
+        DownloadedPackage (( package, _ ) as pair) ->
             case model of
                 DownloadingPackages inner ->
                     { doing = List.Extra.remove package inner.doing
-                    , done = package :: inner.done
+                    , done = pair :: inner.done
                     , todo = inner.todo
                     }
                         |> fillQueue
@@ -76,7 +76,7 @@ update msg model =
 
 fillQueue :
     { doing : List Package
-    , done : List Package
+    , done : List ( Package, Bool )
     , todo : List Package
     }
     -> ( Model, Effect.Effect Msg )
@@ -143,8 +143,33 @@ getPackageList =
         |> Effect.perform GotPackageList
 
 
-downloadPackage : Package -> BackendTask FatalError Package
+downloadPackage : Package -> BackendTask FatalError ( Package, Bool )
 downloadPackage package =
+    let
+        targetFolder : String
+        targetFolder =
+            String.join "/"
+                [ "repos"
+                , package.author
+                , package.name
+                , package.version
+                ]
+    in
+    Do.do (File.exists targetFolder) <| \exists ->
+    Do.do
+        (if exists then
+            Do.noop
+
+         else
+            doDownloadPackage package
+        )
+    <| \_ ->
+    Do.do (File.exists (targetFolder ++ "/test")) <| \hasTests ->
+    BackendTask.succeed ( package, hasTests )
+
+
+doDownloadPackage : Package -> BackendTask FatalError ()
+doDownloadPackage package =
     let
         url : String
         url =
@@ -176,6 +201,14 @@ downloadPackage package =
                 , package.version
                 ]
 
+        targetFolderContainer : String
+        targetFolderContainer =
+            String.join "/"
+                [ "repos"
+                , package.author
+                , package.name
+                ]
+
         targetFolder : String
         targetFolder =
             String.join "/"
@@ -197,17 +230,34 @@ downloadPackage package =
                 }
                 |> Stream.pipe (Stream.fileWrite filename)
                 |> Stream.run
-    in
-    Do.do (File.exists targetFolder) <| \exists ->
-    if exists then
-        BackendTask.succeed package
 
-    else
-        Do.do (Script.removeDirectory { recursive = True } tmpFolder) <| \_ ->
-        Do.do (Script.removeFile filename) <| \_ ->
-        Do.do downloadTask <| \_ ->
-        Do.exec "tar" [ "xf", filename, "-C", tmpFolder, "elm.json", "src", "tests" ] <| \_ ->
-        BackendTask.succeed package
+        tarArgs : List String -> List String
+        tarArgs files =
+            [ "xzf"
+            , filename
+            , "--strip-components"
+            , "1"
+            , "-C"
+            , tmpFolder
+            ]
+                ++ List.map
+                    (\file -> package.name ++ "-" ++ package.version ++ "/" ++ file)
+                    files
+    in
+    Do.do (Script.removeDirectory { recursive = True } tmpFolder) <| \_ ->
+    Do.do (Script.removeFile filename) <| \_ ->
+    Do.do downloadTask <| \_ ->
+    Do.do (Script.makeDirectory { recursive = True } tmpFolder) <| \_ ->
+    Do.exec "tar" (tarArgs [ "elm.json", "src" ]) <| \_ ->
+    Do.do
+        (Script.exec "tar" (tarArgs [ "tests" ])
+            -- Ignore errors here
+            |> BackendTask.toResult
+        )
+    <| \_ ->
+    Do.do (Script.makeDirectory { recursive = True } targetFolderContainer) <| \_ ->
+    Do.exec "mv" [ tmpFolder, targetFolder ] <| \_ ->
+    Do.noop
 
 
 view : Tui.Context -> Model -> Screen
@@ -224,6 +274,26 @@ view { width, height, colorProfile } model =
                         |> List.sortBy packageToString
                         |> List.map (\l -> Screen.text (label ++ " " ++ packageToString l))
 
+                toLinesDone : String -> List ( Package, Bool ) -> List Screen
+                toLinesDone label list =
+                    list
+                        |> List.sortBy (\( package, _ ) -> packageToString package)
+                        |> List.map
+                            (\( package, hasTests ) ->
+                                Screen.text
+                                    (label
+                                        ++ " "
+                                        ++ packageToString package
+                                        ++ " "
+                                        ++ (if hasTests then
+                                                "has tests"
+
+                                            else
+                                                "no tests"
+                                           )
+                                    )
+                            )
+
                 minDoneHeight : Int
                 minDoneHeight =
                     4
@@ -235,7 +305,7 @@ view { width, height, colorProfile } model =
                 ( todoColumn, doneColumn ) =
                     mapLonger Tuple.pair
                         (toLines icons.waiting todo)
-                        (toLines icons.done done)
+                        (toLinesDone icons.done done)
                         |> List.take (height - 1 - doingLines)
                         |> List.unzip
                         |> Tuple.mapBoth
