@@ -54,7 +54,7 @@ type alias Package =
 
 inFlightDownloads : Int
 inFlightDownloads =
-    1
+    10
 
 
 run : Script
