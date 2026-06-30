@@ -1,0 +1,269 @@
+module Main exposing (run)
+
+import BackendTask exposing (BackendTask)
+import BackendTask.Do as Do
+import BackendTask.File as File
+import BackendTask.Http as Http
+import BackendTask.Stream as Stream
+import FatalError exposing (FatalError)
+import Json.Decode
+import Json.Encode
+import List.Extra
+import Pages.Script as Script exposing (Script)
+import Tui
+import Tui.Effect as Effect exposing (Effect)
+import Tui.Screen as Screen exposing (Screen)
+import Tui.Sub
+import Url.Builder
+
+
+type Model
+    = GettingPackageList
+    | DownloadingPackages
+        { done : List Package
+        , doing : List Package
+        , todo : List Package
+        }
+
+
+type Msg
+    = GotPackageList (List Package)
+    | DownloadedPackage Package
+
+
+type alias Package =
+    { author : String
+    , name : String
+    , version : String
+    }
+
+
+inFlightDownloads : Int
+inFlightDownloads =
+    10
+
+
+run : Script
+run =
+    Tui.program
+        { data = BackendTask.succeed ()
+        , init = \() -> ( GettingPackageList, getPackageList )
+        , update = update
+        , view = view
+        , subscriptions = subscriptions
+        }
+        |> Tui.toScript
+
+
+update : Msg -> Model -> ( Model, Effect.Effect Msg )
+update msg model =
+    case msg of
+        GotPackageList packages ->
+            { todo = packages, doing = [], done = [] } |> fillQueue
+
+        DownloadedPackage package ->
+            case model of
+                DownloadingPackages inner ->
+                    { doing = List.Extra.remove package inner.doing
+                    , done = package :: inner.done
+                    , todo = inner.todo
+                    }
+                        |> fillQueue
+
+                _ ->
+                    ( model, Effect.none )
+
+
+fillQueue :
+    { doing : List Package
+    , done : List Package
+    , todo : List Package
+    }
+    -> ( Model, Effect.Effect Msg )
+fillQueue ({ todo, doing, done } as data) =
+    let
+        toAddCount =
+            inFlightDownloads - List.length todo
+    in
+    if toAddCount == 0 then
+        ( DownloadingPackages data, Effect.none )
+
+    else
+        let
+            ( toAdd, newTodo ) =
+                List.Extra.splitAt toAddCount todo
+        in
+        ( DownloadingPackages
+            { todo = newTodo
+            , doing = doing ++ toAdd
+            , done = done
+            }
+        , toAdd
+            |> List.map (\package -> Effect.perform DownloadedPackage (downloadPackage package))
+            |> Effect.batch
+        )
+
+
+getPackageList : Effect Msg
+getPackageList =
+    Http.get "https://package.elm-lang.org/search.json"
+        (Http.expectJson
+            (Json.Decode.list
+                (Json.Decode.map2
+                    (\( author, name ) version ->
+                        { author = author
+                        , name = name
+                        , version = version
+                        }
+                    )
+                    (Json.Decode.field "name"
+                        (Json.Decode.string
+                            |> Json.Decode.andThen
+                                (\raw ->
+                                    case String.split "/" raw of
+                                        [ author, name ] ->
+                                            Json.Decode.succeed ( author, name )
+
+                                        _ ->
+                                            let
+                                                msg : String
+                                                msg =
+                                                    "Could not split package author and name in " ++ Json.Encode.encode 0 (Json.Encode.string raw)
+                                            in
+                                            Json.Decode.fail msg
+                                )
+                        )
+                    )
+                    (Json.Decode.field "version" Json.Decode.string)
+                )
+            )
+        )
+        |> BackendTask.allowFatal
+        |> Effect.perform GotPackageList
+
+
+downloadPackage : Package -> BackendTask FatalError Package
+downloadPackage package =
+    let
+        url : String
+        url =
+            Url.Builder.crossOrigin "https://github.com"
+                [ package.author
+                , package.name
+                , "archive"
+                , "refs"
+                , "tags"
+                , package.version ++ ".tar.gz"
+                ]
+                []
+
+        filename : String
+        filename =
+            String.join "/"
+                [ "tmp"
+                , package.author
+                , package.name
+                , package.version ++ ".tar.gz"
+                ]
+
+        tmpFolder : String
+        tmpFolder =
+            String.join "/"
+                [ "tmp"
+                , package.author
+                , package.name
+                , package.version
+                ]
+
+        targetFolder : String
+        targetFolder =
+            String.join "/"
+                [ "repos"
+                , package.author
+                , package.name
+                , package.version
+                ]
+
+        downloadTask : BackendTask FatalError ()
+        downloadTask =
+            Stream.http
+                { url = url
+                , method = "GET"
+                , headers = []
+                , body = Http.emptyBody
+                , retries = Nothing
+                , timeoutInMs = Nothing
+                }
+                |> Stream.pipe (Stream.fileWrite filename)
+                |> Stream.run
+    in
+    Do.do (File.exists targetFolder) <| \exists ->
+    if exists then
+        BackendTask.succeed package
+
+    else
+        Do.do (Script.removeDirectory { recursive = True } tmpFolder) <| \_ ->
+        Do.do (Script.removeFile filename) <| \_ ->
+        Do.do downloadTask <| \_ ->
+        Do.exec "tar" [ "xf", filename, "-C", tmpFolder, "elm.json", "src", "tests" ] <| \_ ->
+        BackendTask.succeed package
+
+
+view : Tui.Context -> Model -> Screen
+view { width, height, colorProfile } model =
+    case model of
+        GettingPackageList ->
+            Screen.text (icons.running ++ " Getting package list")
+
+        DownloadingPackages { todo, doing, done } ->
+            let
+                toLines : String -> List Package -> List Screen
+                toLines label list =
+                    list
+                        |> List.sortBy packageToString
+                        |> List.map (\l -> Screen.text (label ++ " " ++ packageToString l))
+
+                minDoneHeight : Int
+                minDoneHeight =
+                    4
+
+                doingLines : Int
+                doingLines =
+                    min (height - 1 - minDoneHeight) (List.length doing)
+
+                ( todoColumn, doneColumn ) =
+                    List.map2 Tuple.pair
+                        (toLines icons.waiting todo)
+                        (toLines icons.done done)
+                        |> List.take (height - 1 - doingLines)
+                        |> List.unzip
+                        |> Tuple.mapBoth Screen.lines Screen.lines
+            in
+            (Screen.text "Downloading packages"
+                :: toLines icons.running (List.take doingLines doing)
+                ++ [ Screen.concat [ todoColumn, doneColumn ] ]
+            )
+                |> List.take height
+                |> Screen.lines
+
+
+icons :
+    { done : String
+    , waiting : String
+    , running : String
+    }
+icons =
+    { done = "✅"
+    , waiting = "🕑"
+    , running = "🏃"
+    }
+
+
+packageToString : Package -> String
+packageToString package =
+    package.author ++ "/" ++ package.name ++ ":" ++ package.version
+
+
+subscriptions : Model -> Tui.Sub.Sub Msg
+subscriptions _ =
+    Tui.Sub.none
