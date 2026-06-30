@@ -40,9 +40,10 @@ type DownloadError
     = FailedToRemoveDirectory String
     | FailedToRemoveFile String
     | FailedToMakeDirectory String
-    | FailedToExecute String (List String)
+    | FailedToExecute String
     | FailedToStatFile String
     | DownloadedEmptyFile String String
+    | FailedToExtractRootFolder String
 
 
 type alias Package =
@@ -93,17 +94,17 @@ update msg model =
                 |> fillQueue
 
         DownloadedPackage package (Err e) ->
-            case model of
-                DownloadingPackages inner ->
-                    { doing = List.Extra.remove package inner.doing
-                    , done = inner.done
-                    , todo = inner.todo
-                    , failed = package :: inner.failed
-                    }
-                        |> fillQueue
-
-                _ ->
-                    ( model, Effect.none )
+            -- case model of
+            --     DownloadingPackages inner ->
+            --         { doing = List.Extra.remove package inner.doing
+            --         , done = inner.done
+            --         , todo = inner.todo
+            --         , failed = package :: inner.failed
+            --         }
+            --             |> fillQueue
+            --     _ ->
+            --         ( model, Effect.none )
+            ( FatalError (Debug.toString e), Effect.none )
 
         DownloadedPackage package (Ok hasTests) ->
             case model of
@@ -266,8 +267,8 @@ doDownloadPackage package =
                 , package.version
                 ]
 
-        tarArgs : List String -> List String
-        tarArgs files =
+        tarArgs : String -> List String -> List String
+        tarArgs tarRoot files =
             [ "xzf"
             , filename
             , "--strip-components"
@@ -276,7 +277,7 @@ doDownloadPackage package =
             , tmpFolder
             ]
                 ++ List.map
-                    (\file -> package.name ++ "-" ++ package.version ++ "/" ++ file)
+                    (\file -> tarRoot ++ "/" ++ file)
                     files
 
         removeDirectoryRecursive : String -> BackendTask DownloadError ()
@@ -296,8 +297,17 @@ doDownloadPackage package =
 
         exec : String -> List String -> BackendTask DownloadError ()
         exec cmd args =
+            let
+                maybeQuote : String -> String
+                maybeQuote s =
+                    if String.contains " " s then
+                        Json.Encode.encode 0 (Json.Encode.string s)
+
+                    else
+                        s
+            in
             Script.exec cmd args
-                |> BackendTask.mapError (\_ -> FailedToExecute cmd args)
+                |> BackendTask.mapError (\_ -> FailedToExecute (String.join " " (List.map maybeQuote (cmd :: args))))
 
         stat : String -> BackendTask DownloadError Glob.FileStats
         stat file =
@@ -306,6 +316,25 @@ doDownloadPackage package =
                 |> Glob.captureStats
                 |> Glob.expectUniqueMatch
                 |> BackendTask.mapError (\_ -> FailedToStatFile file)
+
+        getTarRoot : BackendTask DownloadError String
+        getTarRoot =
+            Script.command "tar" [ "tf", filename ]
+                |> BackendTask.mapError (\_ -> FailedToExtractRootFolder filename)
+                |> BackendTask.andThen
+                    (\raw ->
+                        case String.lines raw of
+                            head :: _ ->
+                                case String.split "/" head of
+                                    root :: _ ->
+                                        BackendTask.succeed root
+
+                                    [] ->
+                                        BackendTask.fail (FailedToExtractRootFolder filename)
+
+                            [] ->
+                                BackendTask.fail (FailedToExtractRootFolder filename)
+                    )
     in
     Do.do (removeDirectoryRecursive tmpFolder) <| \_ ->
     Do.do (removeFile filename) <| \_ ->
@@ -316,10 +345,11 @@ doDownloadPackage package =
         BackendTask.fail (DownloadedEmptyFile url filename)
 
     else
+        Do.do getTarRoot <| \tarRoot ->
         Do.do (makeDirectoryRecursive tmpFolder) <| \_ ->
-        Do.do (exec "tar" (tarArgs [ "elm.json", "src" ])) <| \_ ->
+        Do.do (exec "tar" (tarArgs tarRoot [ "elm.json", "src" ])) <| \_ ->
         Do.do
-            (exec "tar" (tarArgs [ "tests" ])
+            (exec "tar" (tarArgs tarRoot [ "tests" ])
                 -- Ignore errors here
                 |> BackendTask.toResult
             )
