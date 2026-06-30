@@ -82,8 +82,9 @@ fillQueue :
     -> ( Model, Effect.Effect Msg )
 fillQueue ({ todo, doing, done } as data) =
     let
+        toAddCount : Int
         toAddCount =
-            inFlightDownloads - List.length todo
+            inFlightDownloads - List.length doing
     in
     if toAddCount == 0 then
         ( DownloadingPackages data, Effect.none )
@@ -232,19 +233,58 @@ view { width, height, colorProfile } model =
                     min (height - 1 - minDoneHeight) (List.length doing)
 
                 ( todoColumn, doneColumn ) =
-                    List.map2 Tuple.pair
+                    mapLonger Tuple.pair
                         (toLines icons.waiting todo)
                         (toLines icons.done done)
                         |> List.take (height - 1 - doingLines)
                         |> List.unzip
-                        |> Tuple.mapBoth Screen.lines Screen.lines
+                        |> Tuple.mapBoth
+                            (\c ->
+                                c
+                                    |> List.filterMap identity
+                                    |> Screen.lines
+                            )
+                            (\c ->
+                                c
+                                    |> List.filterMap identity
+                                    |> Screen.lines
+                            )
+
+                totalCount : Int
+                totalCount =
+                    List.length todo + List.length doing + List.length done
             in
-            (Screen.text "Downloading packages"
+            (Screen.text ("Downloading " ++ String.fromInt totalCount ++ " packages")
                 :: toLines icons.running (List.take doingLines doing)
                 ++ [ Screen.concat [ todoColumn, doneColumn ] ]
             )
                 |> List.take height
                 |> Screen.lines
+
+
+mapLonger : (Maybe a -> Maybe b -> p) -> List a -> List b -> List p
+mapLonger f l r =
+    mapLongerHelp f l r []
+
+
+mapLongerHelp : (Maybe a -> Maybe b -> c) -> List a -> List b -> List c -> List c
+mapLongerHelp f l r acc =
+    case l of
+        [] ->
+            case r of
+                [] ->
+                    List.reverse acc
+
+                rHead :: rTail ->
+                    mapLongerHelp f l rTail (f Nothing (Just rHead) :: acc)
+
+        lHead :: lTail ->
+            case r of
+                [] ->
+                    mapLongerHelp f lTail r (f (Just lHead) Nothing :: acc)
+
+                rHead :: rTail ->
+                    mapLongerHelp f lTail rTail (f (Just lHead) (Just rHead) :: acc)
 
 
 icons :
