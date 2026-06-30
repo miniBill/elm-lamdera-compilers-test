@@ -155,7 +155,8 @@ fillQueue ({ todo, doing, done, failed } as data) =
 
 getPackageList : Effect Msg
 getPackageList =
-    Http.get "https://package.elm-lang.org/search.json"
+    -- 0.19 cutoff
+    Http.get "https://package.elm-lang.org/all-packages/since/6557"
         (Http.expectJson packageListDecoder)
         |> BackendTask.mapError .recoverable
         |> Effect.attempt GotPackageList
@@ -163,34 +164,36 @@ getPackageList =
 
 packageListDecoder : Json.Decode.Decoder (List Package)
 packageListDecoder =
-    Json.Decode.list
-        (Json.Decode.map2
-            (\( author, name ) version ->
-                { author = author
-                , name = name
-                , version = version
-                }
-            )
-            (Json.Decode.field "name"
-                (Json.Decode.string
-                    |> Json.Decode.andThen
-                        (\raw ->
-                            case String.split "/" raw of
-                                [ author, name ] ->
-                                    Json.Decode.succeed ( author, name )
+    Json.Decode.string
+        |> Json.Decode.andThen
+            (\raw ->
+                case String.split "@" raw of
+                    [ before, version ] ->
+                        case String.split "/" before of
+                            [ author, name ] ->
+                                Json.Decode.succeed
+                                    { author = author
+                                    , name = name
+                                    , version = version
+                                    }
 
-                                _ ->
-                                    let
-                                        msg : String
-                                        msg =
-                                            "Could not split package author and name in " ++ Json.Encode.encode 0 (Json.Encode.string raw)
-                                    in
-                                    Json.Decode.fail msg
-                        )
-                )
+                            _ ->
+                                let
+                                    msg : String
+                                    msg =
+                                        "Could not split package author and name in " ++ Json.Encode.encode 0 (Json.Encode.string raw)
+                                in
+                                Json.Decode.fail msg
+
+                    _ ->
+                        let
+                            msg : String
+                            msg =
+                                "Could not split package author/name and version in " ++ Json.Encode.encode 0 (Json.Encode.string raw)
+                        in
+                        Json.Decode.fail msg
             )
-            (Json.Decode.field "version" Json.Decode.string)
-        )
+        |> Json.Decode.list
 
 
 downloadPackage : Package -> BackendTask DownloadError Bool
