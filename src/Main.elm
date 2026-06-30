@@ -310,7 +310,7 @@ doDownloadPackage package =
     Do.do (removeDirectoryRecursive tmpFolder) <| \_ ->
     Do.do (removeFile filename) <| \_ ->
     Do.do (makeDirectoryRecursive tmpFolder) <| \_ ->
-    Do.do (exec "curl" [ url, "--remove-on-error", "-o", filename ]) <| \_ ->
+    Do.do (exec "curl" [ "-sSL", url, "--remove-on-error", "-o", filename ]) <| \_ ->
     Do.do (stat filename) <| \filenameStats ->
     if filenameStats.sizeInBytes == 0 then
         BackendTask.fail (DownloadedEmptyFile url filename)
