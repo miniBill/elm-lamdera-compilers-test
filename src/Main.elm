@@ -81,11 +81,8 @@ update msg model =
                 packages
                     |> List.Extra.removeWhen
                         (\package ->
-                            List.member package.author
-                                [ "Skinney"
-                                , "pdandy"
-                                , "ryanhg"
-                                ]
+                            -- 404
+                            package.author == "quietgarden"
                         )
             , doing = []
             , done = []
@@ -235,8 +232,8 @@ doDownloadPackage package =
                 ]
                 []
 
-        filename : String
-        filename =
+        gzFilename : String
+        gzFilename =
             String.join "/"
                 [ "tmp"
                 , package.author
@@ -273,7 +270,7 @@ doDownloadPackage package =
         tarArgs : String -> List String -> List String
         tarArgs tarRoot files =
             [ "xzf"
-            , filename
+            , gzFilename
             , "--strip-components"
             , "1"
             , "-C"
@@ -322,8 +319,8 @@ doDownloadPackage package =
 
         getTarRoot : BackendTask DownloadError String
         getTarRoot =
-            Script.command "tar" [ "tf", filename ]
-                |> BackendTask.mapError (\_ -> FailedToExtractRootFolder filename)
+            Script.command "tar" [ "tf", gzFilename ]
+                |> BackendTask.mapError (\_ -> FailedToExtractRootFolder ("Failed to run tar tf for " ++ gzFilename))
                 |> BackendTask.andThen
                     (\raw ->
                         case String.lines raw of
@@ -333,19 +330,20 @@ doDownloadPackage package =
                                         BackendTask.succeed root
 
                                     [] ->
-                                        BackendTask.fail (FailedToExtractRootFolder filename)
+                                        BackendTask.fail (FailedToExtractRootFolder ("Failed to run get root from the first file for " ++ gzFilename))
 
                             [] ->
-                                BackendTask.fail (FailedToExtractRootFolder filename)
+                                -- File is empty anyway, it will fail
+                                BackendTask.succeed ""
                     )
     in
     Do.do (removeDirectoryRecursive tmpFolder) <| \_ ->
-    Do.do (removeFile filename) <| \_ ->
+    Do.do (removeFile gzFilename) <| \_ ->
     Do.do (makeDirectoryRecursive tmpFolder) <| \_ ->
-    Do.do (exec "curl" [ "-sSL", url, "--remove-on-error", "-o", filename ]) <| \_ ->
-    Do.do (stat filename) <| \filenameStats ->
+    Do.do (exec "curl" [ "-sSL", url, "--remove-on-error", "-o", gzFilename ]) <| \_ ->
+    Do.do (stat gzFilename) <| \filenameStats ->
     if filenameStats.sizeInBytes == 0 then
-        BackendTask.fail (DownloadedEmptyFile url filename)
+        BackendTask.fail (DownloadedEmptyFile url gzFilename)
 
     else
         Do.do getTarRoot <| \tarRoot ->
@@ -359,6 +357,8 @@ doDownloadPackage package =
         <| \_ ->
         Do.do (makeDirectoryRecursive targetFolderContainer) <| \_ ->
         Do.do (exec "mv" [ tmpFolder, targetFolder ]) <| \_ ->
+        Do.do (removeFile gzFilename) <| \_ ->
+        Do.do (removeDirectoryRecursive tmpFolder) <| \_ ->
         Do.noop
 
 
