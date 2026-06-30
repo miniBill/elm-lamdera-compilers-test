@@ -40,7 +40,7 @@ type alias Package =
 
 inFlightDownloads : Int
 inFlightDownloads =
-    10
+    1
 
 
 run : Script
@@ -218,19 +218,6 @@ doDownloadPackage package =
                 , package.version
                 ]
 
-        downloadTask : BackendTask FatalError ()
-        downloadTask =
-            Stream.http
-                { url = url
-                , method = "GET"
-                , headers = []
-                , body = Http.emptyBody
-                , retries = Nothing
-                , timeoutInMs = Nothing
-                }
-                |> Stream.pipe (Stream.fileWrite filename)
-                |> Stream.run
-
         tarArgs : List String -> List String
         tarArgs files =
             [ "xzf"
@@ -246,11 +233,12 @@ doDownloadPackage package =
     in
     Do.do (Script.removeDirectory { recursive = True } tmpFolder) <| \_ ->
     Do.do (Script.removeFile filename) <| \_ ->
-    Do.do downloadTask <| \_ ->
     Do.do (Script.makeDirectory { recursive = True } tmpFolder) <| \_ ->
-    Do.exec "tar" (tarArgs [ "elm.json", "src" ]) <| \_ ->
+    Do.do (execWithLogging "curl" [ url, "--remove-on-error", "-o", filename ]) <| \_ ->
+    Do.do (Script.makeDirectory { recursive = True } tmpFolder) <| \_ ->
+    Do.do (execWithLogging "tar" (tarArgs [ "elm.json", "src" ])) <| \_ ->
     Do.do
-        (Script.exec "tar" (tarArgs [ "tests" ])
+        (execWithLogging "tar" (tarArgs [ "tests" ])
             -- Ignore errors here
             |> BackendTask.toResult
         )
@@ -258,6 +246,16 @@ doDownloadPackage package =
     Do.do (Script.makeDirectory { recursive = True } targetFolderContainer) <| \_ ->
     Do.exec "mv" [ tmpFolder, targetFolder ] <| \_ ->
     Do.noop
+
+
+execWithLogging : String -> List String -> BackendTask FatalError ()
+execWithLogging cmd args =
+    Script.exec cmd args
+        |> BackendTask.onError
+            (\e ->
+                Do.log (String.join " " (cmd :: args)) <| \_ ->
+                BackendTask.fail e
+            )
 
 
 view : Tui.Context -> Model -> Screen
