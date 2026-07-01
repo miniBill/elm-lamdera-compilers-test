@@ -4,6 +4,7 @@
         "start": "elm-pages run src/Main.elm"
     },
     "devDependencies": {
-        "elm-pages": "^3.5.1"
+        "elm-pages": "^3.5.1",
+        "elm-review": "^2.13.5"
     }
 }
