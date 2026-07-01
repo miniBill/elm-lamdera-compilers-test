@@ -5,16 +5,8 @@ import BackendTask exposing (BackendTask)
 import BackendTask.Customs
 import BackendTask.Do as Do
 import BackendTask.Extra
-import BackendTask.File as File
-import BackendTask.Glob as Glob
-import BackendTask.Http as Http
-import BackendTask.Stream as Stream
 import BackendTask.Time
 import BuildTask exposing (BuildTask, FileOrDirectory)
-import BuildTask.Do as Do
-import BuildTask.Tar
-import BuildTask.Unsafe
-import BuildTask.Unsafe.Do
 import Cli.Option as Option
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
@@ -22,13 +14,9 @@ import CompilerTestBuildfile exposing (Package)
 import FastSet as Set exposing (Set)
 import FatalError exposing (FatalError)
 import Hash
-import Json.Decode
-import Json.Encode
-import List.Extra
-import Pages.Script as Script exposing (Script, makeDirectory)
+import Pages.Script as Script exposing (Script)
 import Path exposing (Path)
 import Time
-import Url.Builder
 
 
 run : Script
@@ -112,7 +100,7 @@ toTask config =
         Do.exec "mkdir" [ "-p", Path.toString config.buildDirectory ] <| \_ ->
         Do.do (BuildTask.run { check = False, jobs = config.jobs, debug = config.debug, hashKind = config.hashKind } config.buildDirectory (config.buildAction inputs)) <| \combined ->
         Do.exec "rm" [ "-f", Path.toString config.outputName ] <| \_ ->
-        symlink_
+        symlink
             { source = config.outputName
             , target =
                 Path.relativeTo
@@ -157,6 +145,7 @@ toTask config =
                 elapsed =
                     Time.posixToMillis end - Time.posixToMillis begin
 
+                msg : String
                 msg =
                     "Build done in "
                         ++ timeToString elapsed
@@ -180,14 +169,9 @@ plural n singular plural_ =
         plural_
 
 
-symlink_ : { source : Path, target : Path } -> (() -> BackendTask FatalError a) -> BackendTask FatalError a
-symlink_ config k =
-    Do.do (symlink config) k
-
-
-symlink : { source : Path, target : Path } -> BackendTask FatalError ()
-symlink { source, target } =
-    Script.exec "ln" [ "-s", Path.toString target, Path.toString source ]
+symlink : { source : Path, target : Path } -> (() -> BackendTask FatalError a) -> BackendTask FatalError a
+symlink { source, target } k =
+    Do.do (Script.exec "ln" [ "-s", Path.toString target, Path.toString source ]) k
 
 
 timeToString : Int -> String
