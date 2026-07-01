@@ -67,6 +67,7 @@ buildAction { missing, packages } =
             List.length packages
     in
     packages
+        |> List.sortBy packageToString
         |> List.indexedMap
             (\index package ->
                 let
