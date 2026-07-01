@@ -98,15 +98,6 @@ packageListDecoder =
 downloadPackage : Package -> BuildTask ( FileOrDirectory, Bool )
 downloadPackage package =
     let
-        targetFolder : String
-        targetFolder =
-            String.join "/"
-                [ "repos"
-                , package.author
-                , package.name
-                , package.version
-                ]
-
         url : String
         url =
             Url.Builder.crossOrigin "https://github.com"
