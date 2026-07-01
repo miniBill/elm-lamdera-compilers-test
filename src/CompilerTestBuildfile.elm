@@ -11,6 +11,7 @@ import Json.Decode
 import Json.Encode
 import Maybe.Extra
 import Path
+import Result.Extra
 import Url.Builder
 
 
@@ -142,16 +143,44 @@ downloadPackage package =
         hasTests : Bool
         hasTests =
             List.member (root ++ "/tests/") contents
-    in
-    BuildTask.do
-        (if hasTests then
-            BuildTask.Tar.extract { stripPrefix = Just root } tar [ "elm.json", "src", "tests" ]
 
-         else
-            BuildTask.Tar.extract { stripPrefix = Just root } tar [ "elm.json", "src" ]
-        )
-    <| \result ->
-    BuildTask.succeed ( result, hasTests )
+        toExtract : Result String (List String)
+        toExtract =
+            contents
+                |> Result.Extra.combineMap
+                    (\file ->
+                        if String.isEmpty file || String.endsWith "/" file then
+                            Ok Nothing
+
+                        else if not (String.startsWith (root ++ "/") file) then
+                            Err ("Unexpected file " ++ escape file ++ ", expected root " ++ root)
+
+                        else
+                            let
+                                cut : String
+                                cut =
+                                    String.dropLeft (String.length root + 1) file
+                            in
+                            if
+                                (cut == "elm.json")
+                                    || (String.endsWith ".elm" cut
+                                            && (String.startsWith "src/" cut || String.startsWith "tests/" cut)
+                                       )
+                            then
+                                Ok (Just cut)
+
+                            else
+                                Ok Nothing
+                    )
+                |> Result.map Maybe.Extra.values
+    in
+    case toExtract of
+        Err e ->
+            BuildTask.fail e
+
+        Ok list ->
+            BuildTask.do (BuildTask.Tar.extract { stripPrefix = Just root } tar list) <| \result ->
+            BuildTask.succeed ( result, hasTests )
     )
         |> BuildTask.toResult
         |> BuildTask.map Result.toMaybe
