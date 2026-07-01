@@ -2,40 +2,36 @@ module Main exposing (run)
 
 import Ansi.Color
 import BackendTask exposing (BackendTask)
+import BackendTask.Customs
 import BackendTask.Do as Do
+import BackendTask.Extra
 import BackendTask.File as File
 import BackendTask.Glob as Glob
 import BackendTask.Http as Http
 import BackendTask.Stream as Stream
+import BackendTask.Time
+import BuildTask exposing (BuildTask, FileOrDirectory)
+import BuildTask.Do as Do
+import BuildTask.Tar
+import BuildTask.Unsafe
+import BuildTask.Unsafe.Do
+import Cli.Option as Option
+import Cli.OptionsParser as OptionsParser
+import Cli.Program as Program
+import FastSet as Set exposing (Set)
 import FatalError exposing (FatalError)
+import Hash
 import Json.Decode
 import Json.Encode
 import List.Extra
 import Pages.Script as Script exposing (Script, makeDirectory)
-import Set
+import Path exposing (Path)
 import Time
 import Tui
 import Tui.Effect as Effect exposing (Effect)
 import Tui.Screen as Screen exposing (Screen)
 import Tui.Sub
 import Url.Builder
-
-
-type Model
-    = GettingPackageList
-    | DownloadingPackages
-        { done : List ( Package, Bool )
-        , doing : List Package
-        , todo : List Package
-        , failed : List Package
-        }
-    | FatalError String
-
-
-type Msg
-    = GotPackageList (Result Http.Error (List Package))
-    | DownloadedPackage Package (Result DownloadError Bool)
-    | Tick Time.Posix
 
 
 type DownloadError
@@ -55,125 +51,223 @@ type alias Package =
     }
 
 
-inFlightDownloads : Int
-inFlightDownloads =
-    10
-
-
 run : Script
 run =
-    Tui.program
-        { data = BackendTask.succeed ()
-        , init = \() -> ( GettingPackageList, getPackageList )
-        , update = update
-        , view = view
-        , subscriptions = subscriptions
-        }
-        |> Tui.toScript
+    Script.withCliOptions programConfig toTask
 
 
-update : Msg -> Model -> ( Model, Effect Msg )
-update msg model =
-    case msg of
-        GotPackageList (Err e) ->
-            ( FatalError (Debug.toString e), Effect.none )
+programConfig : Program.Config (Config (List Package))
+programConfig =
+    Program.config
+        |> Program.add
+            (OptionsParser.build
+                (Config
+                    (BackendTask.allowFatal getPackageList)
+                    buildAction
+                )
+                |> OptionsParser.with
+                    (Option.optionalKeywordArg "build"
+                        |> Option.withDefault "build"
+                        |> Option.map Path.path
+                        |> Option.withDisplayName "dir"
+                        |> Option.withDescription "Build directory - contains the intermediate files"
+                    )
+                |> OptionsParser.with
+                    (Option.optionalKeywordArg "output"
+                        |> Option.withDefault "out"
+                        |> Option.map Path.path
+                        |> Option.withDisplayName "dir"
+                        |> Option.withDescription "Output directory"
+                    )
+                |> OptionsParser.with
+                    (Option.flag "remove-stale"
+                        |> Option.withDescription "Remove unused files from the build directory"
+                    )
+                |> OptionsParser.with
+                    (Option.optionalKeywordArg "jobs"
+                        |> Option.withDescription "Number of parallel jobs to run"
+                        |> Option.withDisplayName "n"
+                        |> Option.validateMapIfPresent
+                            (\j ->
+                                case String.toInt j of
+                                    Nothing ->
+                                        Err ("Invalid number of jobs: " ++ j)
 
-        GotPackageList (Ok packages) ->
-            ( DownloadingPackages
-                { todo =
-                    packages
-                        |> List.Extra.removeWhen
-                            (\package ->
-                                -- 404
-                                package.author == "quietgarden"
+                                    Just i ->
+                                        Ok i
                             )
-                        |> List.sortBy packageToString
-                , doing = []
-                , done = []
-                , failed = []
-                }
-            , Effect.none
+                    )
+                |> OptionsParser.with
+                    (Option.flag "debug"
+                        |> Option.withDescription "Output debug info"
+                    )
+                |> OptionsParser.with
+                    (Option.optionalKeywordArg "hash-kind"
+                        |> Option.withDescription "Kind of hash to use. Choose fast for FNV1a, secure for sha256."
+                        |> Option.withDefault "fast"
+                        |> Option.oneOf [ ( "fast", Hash.Fast ), ( "secure", Hash.Secure ) ]
+                    )
             )
 
-        DownloadedPackage package (Err e) ->
-            case model of
-                DownloadingPackages inner ->
-                    ( DownloadingPackages
-                        { doing = List.Extra.remove package inner.doing
-                        , done = inner.done
-                        , todo = inner.todo
-                        , failed = package :: inner.failed
-                        }
-                    , Effect.none
-                    )
 
-                _ ->
-                    ( model, Effect.none )
-
-        DownloadedPackage package (Ok hasTests) ->
-            case model of
-                DownloadingPackages inner ->
-                    ( DownloadingPackages
-                        { doing = List.Extra.remove package inner.doing
-                        , done = ( package, hasTests ) :: inner.done
-                        , todo = inner.todo
-                        , failed = inner.failed
-                        }
-                    , Effect.none
-                    )
-
-                _ ->
-                    ( model, Effect.none )
-
-        Tick _ ->
-            case model of
-                DownloadingPackages inner ->
-                    inner |> fillQueue
-
-                _ ->
-                    ( model, Effect.none )
-
-
-fillQueue :
-    { doing : List Package
-    , done : List ( Package, Bool )
-    , todo : List Package
-    , failed : List Package
+type alias Config inputs =
+    { getInputs : BackendTask FatalError inputs
+    , buildAction : inputs -> BuildTask FileOrDirectory
+    , buildDirectory : Path
+    , outputName : Path
+    , removeStale : Bool
+    , jobs : Maybe Int
+    , debug : Bool
+    , hashKind : Hash.Kind
     }
-    -> ( Model, Effect Msg )
-fillQueue ({ todo, doing, done, failed } as data) =
-    let
-        toAddCount : Int
-        toAddCount =
-            inFlightDownloads - List.length doing
-    in
-    if toAddCount == 0 then
-        ( DownloadingPackages data, Effect.none )
+
+
+toTask : Config inputs -> BackendTask FatalError ()
+toTask config =
+    BackendTask.Extra.profiling "main" <|
+        Do.do BackendTask.Time.now <| \begin ->
+        Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Getting inputs") <| \_ ->
+        Do.do config.getInputs <| \inputs ->
+        Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
+        Do.exec "mkdir" [ "-p", Path.toString config.buildDirectory ] <| \_ ->
+        Do.do (BuildTask.run { jobs = config.jobs, debug = config.debug, hashKind = config.hashKind } config.buildDirectory (config.buildAction inputs)) <| \combined ->
+        Do.exec "rm" [ "-f", Path.toString config.outputName ] <| \_ ->
+        symlink_
+            { source = config.outputName
+            , target =
+                Path.relativeTo
+                    (Path.directory config.outputName)
+                    combined.output
+            }
+        <| \_ ->
+        Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Output: " ++ Path.toString combined.output) <| \_ ->
+        Do.do (BackendTask.Customs.readdir config.buildDirectory) <| \actualList ->
+        let
+            expected : Set String
+            expected =
+                combined.intermediate
+                    |> List.map Path.toString
+                    |> Set.fromList
+
+            actual : Set String
+            actual =
+                actualList
+                    |> List.map (\file -> Path.toString config.buildDirectory ++ "/" ++ file)
+                    |> Set.fromList
+
+            unexpected : Set String
+            unexpected =
+                Set.diff actual expected
+        in
+        if config.removeStale then
+            Do.log ("Removing " ++ String.fromInt (Set.size unexpected) ++ " files from the build directory") <| \_ ->
+            Do.do
+                (Set.toList unexpected
+                    |> List.map
+                        (\i ->
+                            Do.exec "chmod" [ "-R", "700", i ] <| \_ ->
+                            Script.exec "rm" [ "-rf", i ]
+                        )
+                    |> BackendTask.Extra.sequence_
+                )
+            <| \_ ->
+            Do.do BackendTask.Time.now <| \end ->
+            let
+                elapsed : Int
+                elapsed =
+                    Time.posixToMillis end - Time.posixToMillis begin
+
+                msg =
+                    "Build done in "
+                        ++ timeToString elapsed
+                        ++ " with "
+                        ++ String.fromInt (Set.size combined.warnings)
+                        ++ " "
+                        ++ plural (Set.size combined.warnings) "warning" "warnings"
+            in
+            Script.log msg
+
+        else
+            Script.log (String.fromInt (Set.size unexpected) ++ " stale files in the build directory")
+
+
+plural : Int -> String -> String -> String
+plural n singular plural_ =
+    if n == 1 then
+        singular
 
     else
-        let
-            ( toAdd, newTodo ) =
-                List.Extra.splitAt toAddCount todo
-        in
-        ( DownloadingPackages
-            { todo = newTodo
-            , doing = doing ++ toAdd
-            , done = done
-            , failed = failed
-            }
-        , toAdd
-            |> List.map (\package -> Effect.attempt (DownloadedPackage package) (downloadPackage package))
-            |> Effect.batch
-        )
+        plural_
 
 
-getPackageList : Effect Msg
+symlink_ : { source : Path, target : Path } -> (() -> BackendTask FatalError a) -> BackendTask FatalError a
+symlink_ config k =
+    Do.do (symlink config) k
+
+
+symlink : { source : Path, target : Path } -> BackendTask FatalError ()
+symlink { source, target } =
+    Script.exec "ln" [ "-s", Path.toString target, Path.toString source ]
+
+
+timeToString : Int -> String
+timeToString ms =
+    let
+        s : Int
+        s =
+            ms // 1000
+
+        m : Int
+        m =
+            s // 60
+    in
+    if m > 0 then
+        String.fromInt m ++ "m " ++ String.fromInt (modBy 60 s) ++ "s " ++ String.fromInt (modBy 1000 ms) ++ "ms"
+
+    else if s > 0 then
+        String.fromFloat (toFloat ms / 1000) ++ "s"
+
+    else
+        String.fromInt ms ++ "ms"
+
+
+buildAction : List Package -> BuildTask FileOrDirectory
+buildAction packages =
+    let
+        packagesCount : Int
+        packagesCount =
+            List.length packages
+    in
+    packages
+        |> List.indexedMap
+            (\index package ->
+                let
+                    prefix : String
+                    prefix =
+                        "["
+                            ++ String.padLeft (String.length (String.fromInt packagesCount)) '0' (String.fromInt index)
+                            ++ "/"
+                            ++ String.fromInt packagesCount
+                            ++ "]"
+                in
+                downloadPackage package
+                    |> BuildTask.withPrefix prefix
+                    |> BuildTask.map
+                        (\( downloaded, hasTests ) ->
+                            { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
+                            , hash = downloaded
+                            }
+                        )
+            )
+        |> BuildTask.combine
+        |> BuildTask.andThen BuildTask.combineInto
+
+
+getPackageList : BackendTask { fatal : FatalError, recoverable : Http.Error } (List Package)
 getPackageList =
     -- 0.19 cutoff
     Http.get "https://package.elm-lang.org/all-packages/since/6557"
         (Http.expectJson packageListDecoder)
-        |> BackendTask.mapError .recoverable
-        |> Effect.attempt GotPackageList
 
 
 packageListDecoder : Json.Decode.Decoder (List Package)
@@ -195,7 +289,7 @@ packageListDecoder =
                                 let
                                     msg : String
                                     msg =
-                                        "Could not split package author and name in " ++ Json.Encode.encode 0 (Json.Encode.string raw)
+                                        "Could not split package author and name in " ++ escape raw
                                 in
                                 Json.Decode.fail msg
 
@@ -203,14 +297,14 @@ packageListDecoder =
                         let
                             msg : String
                             msg =
-                                "Could not split package author/name and version in " ++ Json.Encode.encode 0 (Json.Encode.string raw)
+                                "Could not split package author/name and version in " ++ escape raw
                         in
                         Json.Decode.fail msg
             )
         |> Json.Decode.list
 
 
-downloadPackage : Package -> BackendTask DownloadError Bool
+downloadPackage : Package -> BuildTask ( FileOrDirectory, Bool )
 downloadPackage package =
     let
         targetFolder : String
@@ -221,17 +315,64 @@ downloadPackage package =
                 , package.name
                 , package.version
                 ]
+
+        url : String
+        url =
+            Url.Builder.crossOrigin "https://github.com"
+                [ package.author
+                , package.name
+                , "archive"
+                , "refs"
+                , "tags"
+                , package.version ++ ".tar.gz"
+                ]
+                []
+
+        getRoot : List String -> BuildTask String
+        getRoot contents =
+            case contents of
+                firstLine :: _ ->
+                    case String.split "/" firstLine of
+                        [ root, "" ] ->
+                            BuildTask.succeed root
+
+                        _ ->
+                            BuildTask.fail ("Unexpected first content line: " ++ escape firstLine)
+
+                _ ->
+                    -- Empty file, root is irrelevant
+                    BuildTask.succeed ""
     in
-    Do.do (File.exists targetFolder) <| \exists ->
-    Do.do
-        (if exists then
-            Do.noop
+    BuildTask.Unsafe.Do.downloadImmutable url <| \tarGz ->
+    BuildTask.Unsafe.Do.pipeThrough "gunzip" [] tarGz <| \tar ->
+    BuildTask.do (BuildTask.Tar.listContents tar) <| \contents ->
+    BuildTask.do (getRoot contents) <| \root ->
+    let
+        hasTests : Bool
+        hasTests =
+            List.member (root ++ "/tests/") contents
+    in
+    BuildTask.do
+        (if hasTests then
+            BuildTask.Tar.extract { stripPrefix = Just root } tar [ "elm.json", "src", "tests" ]
 
          else
-            doDownloadPackage package
+            BuildTask.Tar.extract { stripPrefix = Just root } tar [ "elm.json", "src" ]
         )
-    <| \_ ->
-    File.exists (targetFolder ++ "/test")
+    <| \result ->
+    BuildTask.succeed ( result, hasTests )
+
+
+escape : String -> String
+escape s =
+    Json.Encode.encode 0 (Json.Encode.string s)
+
+
+
+-- BuildTask.Tar.extractFiles tarGz [ "elm.json", "src" ]
+-- BuildTask.do BuildTask.Unsafe.commandInWritableDirectory <| \tar ->
+-- Do.do (doDownloadPackage package) <| \_ ->
+-- File.exists (targetFolder ++ "/test")
 
 
 doDownloadPackage : Package -> BackendTask DownloadError ()
@@ -318,7 +459,7 @@ doDownloadPackage package =
                 maybeQuote : String -> String
                 maybeQuote s =
                     if String.contains " " s then
-                        Json.Encode.encode 0 (Json.Encode.string s)
+                        escape s
 
                     else
                         s
@@ -379,63 +520,6 @@ doDownloadPackage package =
         Do.noop
 
 
-view : Tui.Context -> Model -> Screen
-view { width, height, colorProfile } model =
-    case model of
-        FatalError err ->
-            Screen.fg Ansi.Color.red (Screen.text err)
-
-        GettingPackageList ->
-            Screen.text (icons.running ++ " Getting package list")
-
-        DownloadingPackages { todo, doing, done } ->
-            let
-                toLines : String -> List Package -> List Screen
-                toLines label list =
-                    list
-                        |> List.Extra.gatherEqualsBy (\p -> [ p.author, p.name ])
-                        |> List.sortBy (\( h, _ ) -> packageToString h)
-                        |> List.map (\( h, t ) -> { author = h.author, name = h.name, versions = h.version :: List.map .version t })
-                        |> List.map (\l -> Screen.text (label ++ " " ++ packagesToString l))
-
-                minDoneHeight : Int
-                minDoneHeight =
-                    4
-
-                doingLines : Int
-                doingLines =
-                    min (height - 1 - minDoneHeight) (List.length doing)
-
-                ( todoColumn, doneColumn ) =
-                    mapLonger Tuple.pair
-                        (toLines icons.waiting todo)
-                        (toLines icons.done (List.map Tuple.first done))
-                        |> List.take (height - 1 - doingLines)
-                        |> List.unzip
-                        |> Tuple.mapBoth
-                            (\c ->
-                                c
-                                    |> List.filterMap identity
-                                    |> Screen.lines
-                            )
-                            (\c ->
-                                c
-                                    |> List.filterMap identity
-                                    |> Screen.lines
-                            )
-
-                totalCount : Int
-                totalCount =
-                    List.length todo + List.length doing + List.length done
-            in
-            (Screen.text ("Downloading " ++ String.fromInt totalCount ++ " packages")
-                :: toLines icons.running (List.take doingLines doing)
-                ++ [ Screen.concat [ todoColumn, doneColumn ] ]
-            )
-                |> List.take height
-                |> Screen.lines
-
-
 packagesToString : { author : String, name : String, versions : List String } -> String
 packagesToString { author, name, versions } =
     author ++ "/" ++ name ++ " " ++ String.join " " versions
@@ -466,23 +550,6 @@ mapLongerHelp f l r acc =
                     mapLongerHelp f lTail rTail (f (Just lHead) (Just rHead) :: acc)
 
 
-icons :
-    { done : String
-    , waiting : String
-    , running : String
-    }
-icons =
-    { done = "✅"
-    , waiting = "🕑"
-    , running = "🏃"
-    }
-
-
 packageToString : Package -> String
 packageToString package =
     package.author ++ "/" ++ package.name ++ ":" ++ package.version
-
-
-subscriptions : Model -> Tui.Sub.Sub Msg
-subscriptions model =
-    Tui.Sub.everyMillis 100 Tick

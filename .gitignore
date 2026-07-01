@@ -1,4 +1,5 @@
-tmp
 elm-stuff
 node_modules
-repos
+build
+out
+.elm-pages
