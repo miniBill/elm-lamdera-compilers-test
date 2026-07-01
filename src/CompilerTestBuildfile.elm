@@ -4,10 +4,12 @@ import BackendTask exposing (BackendTask)
 import BackendTask.Http as Http
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Tar
+import BuildTask.Unsafe
 import BuildTask.Unsafe.Do
 import FatalError exposing (FatalError)
 import Json.Decode
 import Json.Encode
+import Maybe.Extra
 import Path
 import Url.Builder
 
@@ -43,14 +45,21 @@ buildAction packages =
                 downloadPackage package
                     |> BuildTask.withPrefix prefix
                     |> BuildTask.map
-                        (\( downloaded, hasTests ) ->
-                            { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
-                            , hash = downloaded
-                            }
+                        (Maybe.map
+                            (\( downloaded, hasTests ) ->
+                                { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
+                                , hash = downloaded
+                                }
+                            )
                         )
             )
         |> BuildTask.combine
-        |> BuildTask.andThen BuildTask.combineInto
+        |> BuildTask.andThen
+            (\list ->
+                list
+                    |> Maybe.Extra.values
+                    |> BuildTask.combineInto
+            )
 
 
 getInput : BackendTask FatalError (List Package)
@@ -95,7 +104,7 @@ packageListDecoder =
         |> Json.Decode.list
 
 
-downloadPackage : Package -> BuildTask ( FileOrDirectory, Bool )
+downloadPackage : Package -> BuildTask (Maybe ( FileOrDirectory, Bool ))
 downloadPackage package =
     let
         url : String
@@ -125,7 +134,7 @@ downloadPackage package =
                     -- Empty file, root is irrelevant
                     BuildTask.succeed ""
     in
-    BuildTask.Unsafe.Do.downloadImmutable url <| \tarGz ->
+    (BuildTask.Unsafe.Do.downloadImmutable url <| \tarGz ->
     BuildTask.Unsafe.Do.pipeThrough "gunzip" [] tarGz <| \tar ->
     BuildTask.do (BuildTask.Tar.listContents tar) <| \contents ->
     BuildTask.do (getRoot contents) <| \root ->
@@ -143,6 +152,9 @@ downloadPackage package =
         )
     <| \result ->
     BuildTask.succeed ( result, hasTests )
+    )
+        |> BuildTask.toResult
+        |> BuildTask.map Result.toMaybe
 
 
 escape : String -> String
