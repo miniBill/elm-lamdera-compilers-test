@@ -24,7 +24,7 @@ run =
     Script.withCliOptions programConfig toTask
 
 
-programConfig : Program.Config (Config (List Package))
+programConfig : Program.Config (Config CompilerTestBuildfile.Inputs)
 programConfig =
     Program.config
         |> Program.add

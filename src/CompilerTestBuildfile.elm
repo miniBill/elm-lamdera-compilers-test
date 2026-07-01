@@ -1,10 +1,10 @@
-module CompilerTestBuildfile exposing (Package, buildAction, getInput)
+module CompilerTestBuildfile exposing (Inputs, Package, buildAction, getInput)
 
 import BackendTask exposing (BackendTask)
+import BackendTask.File as File
 import BackendTask.Http as Http
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Tar
-import BuildTask.Unsafe
 import BuildTask.Unsafe.Do
 import FatalError exposing (FatalError)
 import Json.Decode
@@ -22,8 +22,45 @@ type alias Package =
     }
 
 
-buildAction : List Package -> BuildTask FileOrDirectory
-buildAction packages =
+type alias Inputs =
+    { missing : List Package
+    , packages : List Package
+    }
+
+
+getInput : BackendTask FatalError Inputs
+getInput =
+    BackendTask.map2 (\missing packages -> { missing = missing, packages = packages })
+        (File.rawFile "missing"
+            |> BackendTask.toResult
+            |> BackendTask.andThen
+                (\res ->
+                    case res of
+                        Err e ->
+                            case e.recoverable of
+                                File.FileDoesntExist ->
+                                    BackendTask.succeed []
+
+                                _ ->
+                                    BackendTask.fail e.fatal
+
+                        Ok raw ->
+                            raw
+                                |> String.lines
+                                |> Result.Extra.combineMap packageFromString
+                                |> Result.mapError FatalError.fromString
+                                |> BackendTask.fromResult
+                )
+        )
+        -- 0.19 cutoff
+        (Http.get "https://package.elm-lang.org/all-packages/since/6557"
+            (Http.expectJson packageListDecoder)
+            |> BackendTask.allowFatal
+        )
+
+
+buildAction : { missing : List Package, packages : List Package } -> BuildTask FileOrDirectory
+buildAction { missing, packages } =
     let
         packagesCount : Int
         packagesCount =
@@ -43,32 +80,48 @@ buildAction packages =
                             ++ packageToString package
                             ++ " "
                 in
-                downloadPackage package
-                    |> BuildTask.withPrefix prefix
-                    |> BuildTask.map
-                        (Maybe.map
-                            (\( downloaded, hasTests ) ->
-                                { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
-                                , hash = downloaded
-                                }
+                if List.member package missing then
+                    BuildTask.succeed (Err (packageToString package))
+
+                else
+                    downloadPackage package
+                        |> BuildTask.toResult
+                        |> BuildTask.andThen
+                            (\r ->
+                                case r of
+                                    Ok ( downloaded, hasTests ) ->
+                                        { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
+                                        , hash = downloaded
+                                        }
+                                            |> Ok
+                                            |> BuildTask.succeed
+
+                                    Err e ->
+                                        let
+                                            _ =
+                                                Debug.log prefix e
+                                        in
+                                        BuildTask.succeed (Err (packageToString package))
                             )
-                        )
+                        |> BuildTask.withPrefix prefix
             )
         |> BuildTask.combine
         |> BuildTask.andThen
             (\list ->
-                list
-                    |> Maybe.Extra.values
-                    |> BuildTask.combineInto
+                let
+                    ( oks, errs ) =
+                        Result.Extra.partition list
+                in
+                BuildTask.andThen2
+                    (\repos newMissing ->
+                        BuildTask.combineInto
+                            [ { filename = Path.path "repos", hash = repos }
+                            , { filename = Path.path "missing", hash = newMissing }
+                            ]
+                    )
+                    (BuildTask.combineInto oks)
+                    (BuildTask.writeFile (String.join "\n" errs))
             )
-
-
-getInput : BackendTask FatalError (List Package)
-getInput =
-    -- 0.19 cutoff
-    Http.get "https://package.elm-lang.org/all-packages/since/6557"
-        (Http.expectJson packageListDecoder)
-        |> BackendTask.allowFatal
 
 
 packageListDecoder : Json.Decode.Decoder (List Package)
@@ -76,36 +129,36 @@ packageListDecoder =
     Json.Decode.string
         |> Json.Decode.andThen
             (\raw ->
-                case String.split "@" raw of
-                    [ before, version ] ->
-                        case String.split "/" before of
-                            [ author, name ] ->
-                                Json.Decode.succeed
-                                    { author = author
-                                    , name = name
-                                    , version = version
-                                    }
+                case packageFromString raw of
+                    Err e ->
+                        Json.Decode.fail e
 
-                            _ ->
-                                let
-                                    msg : String
-                                    msg =
-                                        "Could not split package author and name in " ++ escape raw
-                                in
-                                Json.Decode.fail msg
-
-                    _ ->
-                        let
-                            msg : String
-                            msg =
-                                "Could not split package author/name and version in " ++ escape raw
-                        in
-                        Json.Decode.fail msg
+                    Ok o ->
+                        Json.Decode.succeed o
             )
         |> Json.Decode.list
 
 
-downloadPackage : Package -> BuildTask (Maybe ( FileOrDirectory, Bool ))
+packageFromString : String -> Result String { author : String, name : String, version : String }
+packageFromString raw =
+    case String.split "@" raw of
+        [ before, version ] ->
+            case String.split "/" before of
+                [ author, name ] ->
+                    Ok
+                        { author = author
+                        , name = name
+                        , version = version
+                        }
+
+                _ ->
+                    Err ("Could not split package author and name in " ++ escape raw)
+
+        _ ->
+            Err ("Could not split package author/name and version in " ++ escape raw)
+
+
+downloadPackage : Package -> BuildTask ( FileOrDirectory, Bool )
 downloadPackage package =
     let
         url : String
@@ -135,15 +188,11 @@ downloadPackage package =
                     -- Empty file, root is irrelevant
                     BuildTask.succeed ""
     in
-    (BuildTask.Unsafe.Do.downloadImmutable url <| \tarGz ->
+    BuildTask.Unsafe.Do.downloadImmutable url <| \tarGz ->
     BuildTask.Unsafe.Do.pipeThrough "gunzip" [] tarGz <| \tar ->
     BuildTask.do (BuildTask.Tar.listContents tar) <| \contents ->
     BuildTask.do (getRoot contents) <| \root ->
     let
-        hasTests : Bool
-        hasTests =
-            List.member (root ++ "/tests/") contents
-
         toExtract : Result String (List String)
         toExtract =
             contents
@@ -179,11 +228,13 @@ downloadPackage package =
             BuildTask.fail e
 
         Ok list ->
+            let
+                hasTests : Bool
+                hasTests =
+                    List.member (root ++ "/tests/") contents
+            in
             BuildTask.do (BuildTask.Tar.extract { stripPrefix = Just root } tar list) <| \result ->
             BuildTask.succeed ( result, hasTests )
-    )
-        |> BuildTask.toResult
-        |> BuildTask.map Result.toMaybe
 
 
 escape : String -> String
