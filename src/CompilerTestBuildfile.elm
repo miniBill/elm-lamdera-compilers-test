@@ -121,7 +121,7 @@ downloadPackage package =
                         _ ->
                             BuildTask.fail ("Unexpected first content line: " ++ escape firstLine)
 
-                _ ->
+                [] ->
                     -- Empty file, root is irrelevant
                     BuildTask.succeed ""
     in
