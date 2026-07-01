@@ -36,7 +36,9 @@ buildAction packages =
                             ++ String.padLeft (String.length (String.fromInt packagesCount)) '0' (String.fromInt index)
                             ++ "/"
                             ++ String.fromInt packagesCount
-                            ++ "]"
+                            ++ "] "
+                            ++ packageToString package
+                            ++ " "
                 in
                 downloadPackage package
                     |> BuildTask.withPrefix prefix
