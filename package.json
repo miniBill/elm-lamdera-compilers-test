@@ -5,6 +5,7 @@
     },
     "devDependencies": {
         "elm-pages": "^3.5.1",
-        "elm-review": "^2.13.5"
+        "elm-review": "^2.13.5",
+        "elm-test-rs": "^3.0.2-0"
     }
 }

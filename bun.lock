@@ -6,6 +6,7 @@
       "devDependencies": {
         "elm-pages": "^3.5.1",
         "elm-review": "^2.13.5",
+        "elm-test-rs": "^3.0.2-0",
       },
     },
   },
@@ -103,6 +104,18 @@
     "@jsonjoy.com/json-pointer": ["@jsonjoy.com/json-pointer@1.0.2", "", { "dependencies": { "@jsonjoy.com/codegen": "^1.0.0", "@jsonjoy.com/util": "^1.9.0" }, "peerDependencies": { "tslib": "2" } }, "sha512-Fsn6wM2zlDzY1U+v4Nc8bo3bVqgfNTGcn6dMgs6FjrEnt4ZCe60o6ByKRjOGlI2gow0aE/Q41QOigdTqkyK5fg=="],
 
     "@jsonjoy.com/util": ["@jsonjoy.com/util@1.9.0", "", { "dependencies": { "@jsonjoy.com/buffers": "^1.0.0", "@jsonjoy.com/codegen": "^1.0.0" }, "peerDependencies": { "tslib": "2" } }, "sha512-pLuQo+VPRnN8hfPqUTLTHk126wuYdXVxE6aDmjSeV4NCAgyxWbiOIeNJVtID3h1Vzpoi9m4jXezf73I6LgabgQ=="],
+
+    "@mattpiz/elm-test-rs-darwin-arm64": ["@mattpiz/elm-test-rs-darwin-arm64@3.0.2-0", "", { "os": "darwin", "cpu": "arm64" }, "sha512-Gb1f4L09fxF1QfpatoGc41+dfepfzZn7K1eVLU9Zh/ft15vivTg3Snk611dYDo8PdEm+dZ9Xf8GkqX3NTz4BzA=="],
+
+    "@mattpiz/elm-test-rs-darwin-x64": ["@mattpiz/elm-test-rs-darwin-x64@3.0.2-0", "", { "os": "darwin", "cpu": "x64" }, "sha512-ly9pcE0sthEeLigkDdzspKEKxVxLNRN7NaDhlV3zs8beKC+AJmFz5AtGIeDIQ8hfNK6QR0xRQxgevlOTYiWbOA=="],
+
+    "@mattpiz/elm-test-rs-linux-arm": ["@mattpiz/elm-test-rs-linux-arm@3.0.2-0", "", { "os": "linux", "cpu": "arm" }, "sha512-DRjK3rsO0rb0AuCMUcLkuuSJuxpBaMobrAyH5av8MrpPh7cwjZ3RhXzCCeweuhfizH1OP/idBeVlmN8hiqA2BQ=="],
+
+    "@mattpiz/elm-test-rs-linux-arm64": ["@mattpiz/elm-test-rs-linux-arm64@3.0.2-0", "", { "os": "linux", "cpu": "arm64" }, "sha512-SpZjVmeAlBSc46Ku3RefFK4LDwsfmVgPerhFgana95dzaTYoruHNrMWUpqU9MT6FOnbJXiJQHZrI+y4VjJ5lJA=="],
+
+    "@mattpiz/elm-test-rs-linux-x64": ["@mattpiz/elm-test-rs-linux-x64@3.0.2-0", "", { "os": "linux", "cpu": "x64" }, "sha512-Ia8kayW/Aag6tEwJOEV5ZIr49KHekDYZjB/oItyYScySlRxII+VppVYmh47o6xlTz9ZO845UkEyngUMZc25Lkg=="],
+
+    "@mattpiz/elm-test-rs-win32-x64": ["@mattpiz/elm-test-rs-win32-x64@3.0.2-0", "", { "os": "win32", "cpu": "x64" }, "sha512-cxPybYCU0wXmhpc2eFTmxEvffWdXpUILlC+YnB4XG3ddTnMOIUGe6C2rK9DfT3o+9fmeq/OlroKcG5I4/cMxsQ=="],
 
     "@nodelib/fs.scandir": ["@nodelib/fs.scandir@2.1.5", "", { "dependencies": { "@nodelib/fs.stat": "2.0.5", "run-parallel": "^1.1.9" } }, "sha512-vq24Bq3ym5HEQm2NKCr3yXDwjc7vTsEThRDnkp2DK9p1uqLR+DHurm/NOTo0KG7HYHU7eppKZj3MyqYuMBf62g=="],
 
@@ -341,6 +354,8 @@
     "elm-review": ["elm-review@2.13.5", "", { "dependencies": { "chalk": "^4.0.0", "chokidar": "^3.5.2", "cross-spawn": "^7.0.3", "elm-solve-deps-wasm": "^1.0.2 || ^2.0.0", "fastest-levenshtein": "^1.0.16", "find-up": "^4.1.0 || ^5.0.0", "folder-hash": "^3.3.0", "got": "^11.8.5", "graceful-fs": "^4.2.11", "minimist": "^1.2.6", "ora": "^5.4.0", "path-key": "^3.1.1", "prompts": "^2.2.1", "strip-ansi": "^6.0.0", "terminal-link": "^2.1.1", "tinyglobby": "^0.2.10", "which": "^2.0.2", "wrap-ansi": "^7.0.0" }, "bin": { "elm-review": "bin/elm-review" } }, "sha512-Iw3YztGjmuGyn4nIEVOxqx+dacJialprpB0ZVrBHA0sBBOQ9+QhBaQnQ0tp0G8U8UoIAush0M7XoBqzUN1F/+A=="],
 
     "elm-solve-deps-wasm": ["elm-solve-deps-wasm@2.0.0", "", {}, "sha512-11OV8FgB9qsth/F94q2SJjb1MoEgbworSyNM1L+YlxVoaxp7wtWPyA8cNcPEkSoIKG1B8Tqg68ED1P6dVamHSg=="],
+
+    "elm-test-rs": ["elm-test-rs@3.0.2-0", "", { "optionalDependencies": { "@mattpiz/elm-test-rs-darwin-arm64": "3.0.2-0", "@mattpiz/elm-test-rs-darwin-x64": "3.0.2-0", "@mattpiz/elm-test-rs-linux-arm": "3.0.2-0", "@mattpiz/elm-test-rs-linux-arm64": "3.0.2-0", "@mattpiz/elm-test-rs-linux-x64": "3.0.2-0", "@mattpiz/elm-test-rs-win32-x64": "3.0.2-0" }, "bin": { "elm-test-rs": "elm-test-rs.js" } }, "sha512-Rzk3PD4unWvuzdzYthUoMjFELL78oRHeYTXpF8KDp/fyHLbb+vxOzmDXHRt51ogvfKSTyiK8y0xa4F+q7lzyfQ=="],
 
     "emoji-regex": ["emoji-regex@8.0.0", "", {}, "sha512-MSjYzcWNOA0ewAHpz0MxpYFvwg6yjy1NG3xteoqz644VCo/RPgnr1/GGt+ic3iJTzQ8Eu3TdM14SawnVUmGE6A=="],
 
