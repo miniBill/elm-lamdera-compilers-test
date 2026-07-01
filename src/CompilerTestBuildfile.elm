@@ -4,13 +4,22 @@ import BackendTask exposing (BackendTask)
 import BackendTask.File as File
 import BackendTask.Http as Http
 import BuildTask exposing (BuildTask, FileOrDirectory)
+import BuildTask.Do
 import BuildTask.Tar
+import BuildTask.Unsafe
 import BuildTask.Unsafe.Do
+import Diff
+import Diff.ToString
+import Elm.Constraint
+import Elm.Package
+import Elm.Project
 import FatalError exposing (FatalError)
 import Json.Decode
 import Json.Encode
+import List.Extra
 import Maybe.Extra
-import Path
+import Pages.Script as Script
+import Path exposing (Path)
 import Result.Extra
 import Url.Builder
 
@@ -30,7 +39,12 @@ type alias Inputs =
 
 getInput : BackendTask FatalError Inputs
 getInput =
-    BackendTask.map2 (\missing packages -> { missing = missing, packages = packages })
+    BackendTask.map2
+        (\missing packages ->
+            { missing = missing
+            , packages = packages
+            }
+        )
         (File.rawFile "missing"
             |> BackendTask.toResult
             |> BackendTask.andThen
@@ -66,7 +80,7 @@ getInput =
         )
 
 
-buildAction : { missing : List Package, packages : List Package } -> BuildTask FileOrDirectory
+buildAction : Inputs -> BuildTask FileOrDirectory
 buildAction { missing, packages } =
     let
         packagesCount : Int
@@ -87,20 +101,84 @@ buildAction { missing, packages } =
                             ++ "] "
                             ++ packageToString package
                             ++ " "
-                in
-                if List.member package missing then
-                    BuildTask.succeed Nothing
 
-                else
-                    downloadPackage package
-                        |> BuildTask.map
-                            (\( downloaded, hasTests ) ->
-                                { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
-                                , hash = downloaded
-                                }
-                                    |> Just
-                            )
-                        |> BuildTask.withPrefix prefix
+                    task : BuildTask (Maybe { filename : Path, hash : FileOrDirectory })
+                    task =
+                        if List.member package missing then
+                            BuildTask.succeed Nothing
+
+                        else
+                            BuildTask.do (downloadPackage package) <| \downloadResult ->
+                            case downloadResult of
+                                Err e ->
+                                    BuildTask.succeed Nothing
+                                        |> BuildTask.withWarning e
+
+                                Ok ( downloaded, hasTests ) ->
+                                    if not hasTests || True then
+                                        { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
+                                        , hash = downloaded
+                                        }
+                                            |> Just
+                                            |> BuildTask.succeed
+
+                                    else
+                                        BuildTask.do
+                                            (BuildTask.Unsafe.commandInReadonlyDirectory "cat" [ "elm.json" ] downloaded)
+                                        <| \elmJsonFile ->
+                                        BuildTask.do (BuildTask.withFile elmJsonFile BuildTask.succeed) <| \elmJsonString ->
+                                        case Json.Decode.decodeString Elm.Project.decoder elmJsonString of
+                                            Err e ->
+                                                BuildTask.fail (Json.Decode.errorToString e)
+
+                                            Ok (Elm.Project.Application _) ->
+                                                BuildTask.fail "Unexpected application-style elm.json"
+
+                                            Ok (Elm.Project.Package elmJson) ->
+                                                let
+                                                    elmTestPathTask : BuildTask String
+                                                    elmTestPathTask =
+                                                        case List.Extra.find (\( name, _ ) -> Just name == Elm.Package.fromString "elm-explorations/test") elmJson.testDeps of
+                                                            Nothing ->
+                                                                BuildTask.fail ("Could not find an elm-explorations/test dependency" ++ "\n" ++ elmJsonString)
+
+                                                            Just ( _, v ) ->
+                                                                case Elm.Constraint.toString v of
+                                                                    "elm-test-2" ->
+                                                                        "/home/minibill/src/miniBill/elm-lamdera-compilers-test/node_modules/.bin/elm-test-rs"
+                                                                            |> BuildTask.succeed
+
+                                                                    vString ->
+                                                                        BuildTask.fail ("Unrecognized elm-explorations/test version: " ++ vString)
+
+                                                    commonElmTestOptions : List String
+                                                    commonElmTestOptions =
+                                                        [ "--report"
+                                                        , "json"
+                                                        , "--seed"
+                                                        , "123456789"
+                                                        ]
+                                                in
+                                                BuildTask.do elmTestPathTask <| \elmTestPath ->
+                                                BuildTask.do (BuildTask.Unsafe.commandInWritableDirectory elmTestPath (commonElmTestOptions ++ [ "--compiler", "elm-0.19.1" ]) downloaded) <| \elm_0_19_1_resultFile ->
+                                                BuildTask.do (BuildTask.Unsafe.commandInWritableDirectory elmTestPath (commonElmTestOptions ++ [ "--compiler", "elm-0.19.2" ]) downloaded) <| \elm_0_19_2_resultFile ->
+                                                BuildTask.Do.withFile elm_0_19_1_resultFile BuildTask.succeed <| \elm_0_19_1_result ->
+                                                BuildTask.Do.withFile elm_0_19_2_resultFile BuildTask.succeed <| \elm_0_19_2_result ->
+                                                if elm_0_19_1_result == elm_0_19_2_result then
+                                                    { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
+                                                    , hash = downloaded
+                                                    }
+                                                        |> Just
+                                                        |> BuildTask.succeed
+
+                                                else
+                                                    Diff.diffLinesWith Diff.defaultOptions
+                                                        (formatJson elm_0_19_1_result)
+                                                        (formatJson elm_0_19_2_result)
+                                                        |> Diff.ToString.diffToString { context = 3, color = True }
+                                                        |> BuildTask.fail
+                in
+                BuildTask.withPrefix prefix task
             )
         |> BuildTask.combine
         |> BuildTask.andThen
@@ -109,6 +187,16 @@ buildAction { missing, packages } =
                     |> Maybe.Extra.values
                     |> BuildTask.combineInto
             )
+
+
+formatJson : String -> String
+formatJson f =
+    case Json.Decode.decodeString Json.Decode.value f of
+        Err _ ->
+            f
+
+        Ok v ->
+            Json.Encode.encode 2 v
 
 
 packageListDecoder : Json.Decode.Decoder (List Package)
@@ -145,7 +233,7 @@ packageFromString raw =
             Err ("Could not split package author/name and version in " ++ escape raw)
 
 
-downloadPackage : Package -> BuildTask ( FileOrDirectory, Bool )
+downloadPackage : Package -> BuildTask (Result String ( FileOrDirectory, Bool ))
 downloadPackage package =
     let
         url : String
@@ -215,13 +303,17 @@ downloadPackage package =
             BuildTask.fail e
 
         Ok list ->
-            let
-                hasTests : Bool
-                hasTests =
-                    List.member (root ++ "/tests/") contents
-            in
-            BuildTask.do (BuildTask.Tar.extract { stripPrefix = Just root } tar list) <| \result ->
-            BuildTask.succeed ( result, hasTests )
+            if List.Extra.notMember "elm.json" list then
+                BuildTask.succeed (Err "Missing elm.json")
+
+            else
+                let
+                    hasTests : Bool
+                    hasTests =
+                        List.member (root ++ "/tests/") contents
+                in
+                BuildTask.do (BuildTask.Tar.extract { stripPrefix = Just root } tar list) <| \result ->
+                BuildTask.succeed (Ok ( result, hasTests ))
 
 
 escape : String -> String
