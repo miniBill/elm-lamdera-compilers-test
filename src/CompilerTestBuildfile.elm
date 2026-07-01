@@ -14,6 +14,7 @@ import Elm.Constraint
 import Elm.Package
 import Elm.Project
 import FatalError exposing (FatalError)
+import Hash
 import Json.Decode
 import Json.Encode
 import List.Extra
@@ -115,7 +116,7 @@ buildAction { missing, packages } =
                                         |> BuildTask.withWarning e
 
                                 Ok ( downloaded, hasTests ) ->
-                                    if not hasTests || True then
+                                    if not hasTests then
                                         { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
                                         , hash = downloaded
                                         }
@@ -123,6 +124,10 @@ buildAction { missing, packages } =
                                             |> BuildTask.succeed
 
                                     else
+                                        BuildTask.do
+                                            (BuildTask.Unsafe.commandInReadonlyDirectory "pwd" [] downloaded)
+                                        <| \pwdFile ->
+                                        BuildTask.do (BuildTask.withFile pwdFile BuildTask.succeed) <| \pwdString ->
                                         BuildTask.do
                                             (BuildTask.Unsafe.commandInReadonlyDirectory "cat" [ "elm.json" ] downloaded)
                                         <| \elmJsonFile ->
@@ -136,20 +141,33 @@ buildAction { missing, packages } =
 
                                             Ok (Elm.Project.Package elmJson) ->
                                                 let
-                                                    elmTestPathTask : BuildTask String
+                                                    elmTestPathTask : BuildTask (Maybe String)
                                                     elmTestPathTask =
                                                         case List.Extra.find (\( name, _ ) -> Just name == Elm.Package.fromString "elm-explorations/test") elmJson.testDeps of
                                                             Nothing ->
-                                                                BuildTask.fail ("Could not find an elm-explorations/test dependency" ++ "\n" ++ elmJsonString)
+                                                                BuildTask.succeed Nothing
+                                                                    |> BuildTask.withWarning ("Could not find an elm-explorations/test dependency in build/" ++ Hash.toString downloaded ++ " - " ++ pwdString ++ "\n" ++ elmJsonString)
 
                                                             Just ( _, v ) ->
-                                                                case Elm.Constraint.toString v of
-                                                                    "elm-test-2" ->
-                                                                        "/home/minibill/src/miniBill/elm-lamdera-compilers-test/node_modules/.bin/elm-test-rs"
-                                                                            |> BuildTask.succeed
+                                                                let
+                                                                    constraintString : String
+                                                                    constraintString =
+                                                                        Elm.Constraint.toString v
+                                                                in
+                                                                if String.endsWith "v < 2.0.0" constraintString then
+                                                                    -- "/home/minibill/src/miniBill/elm-lamdera-compilers-test/node_modules/.bin/elm-test"
+                                                                    --     |> Just
+                                                                    --     |> BuildTask.succeed
+                                                                    BuildTask.succeed Nothing
+                                                                        |> BuildTask.withWarning "elm-test 1 not supported (yet - PRs welcome)"
 
-                                                                    vString ->
-                                                                        BuildTask.fail ("Unrecognized elm-explorations/test version: " ++ vString)
+                                                                else if String.endsWith "v < 3.0.0" constraintString then
+                                                                    "/home/minibill/src/miniBill/elm-lamdera-compilers-test/node_modules/.bin/elm-test-rs"
+                                                                        |> Just
+                                                                        |> BuildTask.succeed
+
+                                                                else
+                                                                    BuildTask.fail ("Unrecognized elm-explorations/test version: " ++ constraintString)
 
                                                     commonElmTestOptions : List String
                                                     commonElmTestOptions =
@@ -159,26 +177,42 @@ buildAction { missing, packages } =
                                                         , "123456789"
                                                         ]
                                                 in
-                                                BuildTask.do elmTestPathTask <| \elmTestPath ->
-                                                BuildTask.do (BuildTask.Unsafe.commandInWritableDirectory elmTestPath (commonElmTestOptions ++ [ "--compiler", "elm-0.19.1" ]) downloaded) <| \elm_0_19_1_resultFile ->
-                                                BuildTask.do (BuildTask.Unsafe.commandInWritableDirectory elmTestPath (commonElmTestOptions ++ [ "--compiler", "elm-0.19.2" ]) downloaded) <| \elm_0_19_2_resultFile ->
-                                                BuildTask.Do.withFile elm_0_19_1_resultFile BuildTask.succeed <| \elm_0_19_1_result ->
-                                                BuildTask.Do.withFile elm_0_19_2_resultFile BuildTask.succeed <| \elm_0_19_2_result ->
-                                                if elm_0_19_1_result == elm_0_19_2_result then
-                                                    { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
-                                                    , hash = downloaded
-                                                    }
-                                                        |> Just
-                                                        |> BuildTask.succeed
+                                                BuildTask.do elmTestPathTask <| \elmTestPathMaybe ->
+                                                case elmTestPathMaybe of
+                                                    Nothing ->
+                                                        BuildTask.succeed Nothing
 
-                                                else
-                                                    Diff.diffLinesWith Diff.defaultOptions
-                                                        (formatJson elm_0_19_1_result)
-                                                        (formatJson elm_0_19_2_result)
-                                                        |> Diff.ToString.diffToString { context = 3, color = True }
-                                                        |> BuildTask.fail
+                                                    Just elmTestPath ->
+                                                        BuildTask.do (BuildTask.Unsafe.commandInWritableDirectory elmTestPath (commonElmTestOptions ++ [ "--compiler", "elm-0.19.1" ]) downloaded) <| \elm_0_19_1_resultFile ->
+                                                        BuildTask.Do.withFile elm_0_19_1_resultFile BuildTask.succeed <| \elm_0_19_1_result ->
+                                                        BuildTask.do (BuildTask.Unsafe.commandInWritableDirectory elmTestPath (commonElmTestOptions ++ [ "--compiler", "elm-0.19.2" ]) downloaded) <| \elm_0_19_2_resultFile ->
+                                                        BuildTask.Do.withFile elm_0_19_2_resultFile BuildTask.succeed <| \elm_0_19_2_result ->
+                                                        if elm_0_19_1_result == elm_0_19_2_result then
+                                                            { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
+                                                            , hash = downloaded
+                                                            }
+                                                                |> Just
+                                                                |> BuildTask.succeed
+
+                                                        else
+                                                            Diff.diffLinesWith Diff.defaultOptions
+                                                                (formatJson elm_0_19_1_result)
+                                                                (formatJson elm_0_19_2_result)
+                                                                |> Diff.ToString.diffToString { context = 3, color = True }
+                                                                |> BuildTask.fail
                 in
-                BuildTask.withPrefix prefix task
+                task
+                    |> BuildTask.toResult
+                    |> BuildTask.andThen
+                        (\v ->
+                            case v of
+                                Ok o ->
+                                    BuildTask.succeed o
+
+                                Err e ->
+                                    BuildTask.fail (Debug.toString e)
+                        )
+                    |> BuildTask.withPrefix prefix
             )
         |> BuildTask.combine
         |> BuildTask.andThen
