@@ -53,8 +53,15 @@ getInput =
                 )
         )
         -- 0.19 cutoff
-        (Http.get "https://package.elm-lang.org/all-packages/since/6557"
-            (Http.expectJson packageListDecoder)
+        (Http.getWithOptions
+            { url = "https://package.elm-lang.org/all-packages/since/6557"
+            , expect = Http.expectJson packageListDecoder
+            , cachePath = Just ".elm-pages/http-response-cache"
+            , cacheStrategy = Just Http.ForceCache
+            , headers = []
+            , retries = Nothing
+            , timeoutInMs = Just 3000
+            }
             |> BackendTask.allowFatal
         )
 
