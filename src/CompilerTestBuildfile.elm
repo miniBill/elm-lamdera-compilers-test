@@ -81,46 +81,25 @@ buildAction { missing, packages } =
                             ++ " "
                 in
                 if List.member package missing then
-                    BuildTask.succeed (Err (packageToString package))
+                    BuildTask.succeed Nothing
 
                 else
                     downloadPackage package
-                        |> BuildTask.toResult
-                        |> BuildTask.andThen
-                            (\r ->
-                                case r of
-                                    Ok ( downloaded, hasTests ) ->
-                                        { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
-                                        , hash = downloaded
-                                        }
-                                            |> Ok
-                                            |> BuildTask.succeed
-
-                                    Err e ->
-                                        let
-                                            _ =
-                                                Debug.log prefix e
-                                        in
-                                        BuildTask.succeed (Err (packageToString package))
+                        |> BuildTask.map
+                            (\( downloaded, hasTests ) ->
+                                { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
+                                , hash = downloaded
+                                }
+                                    |> Just
                             )
                         |> BuildTask.withPrefix prefix
             )
         |> BuildTask.combine
         |> BuildTask.andThen
             (\list ->
-                let
-                    ( oks, errs ) =
-                        Result.Extra.partition list
-                in
-                BuildTask.andThen2
-                    (\repos newMissing ->
-                        BuildTask.combineInto
-                            [ { filename = Path.path "repos", hash = repos }
-                            , { filename = Path.path "missing", hash = newMissing }
-                            ]
-                    )
-                    (BuildTask.combineInto oks)
-                    (BuildTask.writeFile (String.join "\n" errs))
+                list
+                    |> Maybe.Extra.values
+                    |> BuildTask.combineInto
             )
 
 
@@ -244,4 +223,4 @@ escape s =
 
 packageToString : Package -> String
 packageToString package =
-    package.author ++ "/" ++ package.name ++ ":" ++ package.version
+    package.author ++ "/" ++ package.name ++ "@" ++ package.version
