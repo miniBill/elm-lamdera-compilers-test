@@ -183,10 +183,8 @@ buildAction { missing, packages } =
                                                         BuildTask.succeed Nothing
 
                                                     Just elmTestPath ->
-                                                        BuildTask.do (BuildTask.Unsafe.commandInWritableDirectory elmTestPath (commonElmTestOptions ++ [ "--compiler", "elm-0.19.1" ]) downloaded) <| \elm_0_19_1_resultFile ->
-                                                        BuildTask.Do.withFile elm_0_19_1_resultFile BuildTask.succeed <| \elm_0_19_1_result ->
-                                                        BuildTask.do (BuildTask.Unsafe.commandInWritableDirectory elmTestPath (commonElmTestOptions ++ [ "--compiler", "elm-0.19.2" ]) downloaded) <| \elm_0_19_2_resultFile ->
-                                                        BuildTask.Do.withFile elm_0_19_2_resultFile BuildTask.succeed <| \elm_0_19_2_result ->
+                                                        BuildTask.do (BuildTask.Unsafe.commandInWritableDirectoryOutput elmTestPath (commonElmTestOptions ++ [ "--compiler", "elm-0.19.1" ]) downloaded) <| \elm_0_19_1_result ->
+                                                        BuildTask.do (BuildTask.Unsafe.commandInWritableDirectoryOutput elmTestPath (commonElmTestOptions ++ [ "--compiler", "elm-0.19.2" ]) downloaded) <| \elm_0_19_2_result ->
                                                         if elm_0_19_1_result == elm_0_19_2_result then
                                                             { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
                                                             , hash = downloaded
