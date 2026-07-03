@@ -4,7 +4,6 @@ import BackendTask exposing (BackendTask)
 import BackendTask.File as File
 import BackendTask.Http as Http
 import BuildTask exposing (BuildTask, FileOrDirectory)
-import BuildTask.Do
 import BuildTask.Tar
 import BuildTask.Unsafe
 import BuildTask.Unsafe.Do
@@ -19,7 +18,6 @@ import Json.Decode
 import Json.Encode
 import List.Extra
 import Maybe.Extra
-import Pages.Script as Script
 import Path exposing (Path)
 import Result.Extra
 import Url.Builder

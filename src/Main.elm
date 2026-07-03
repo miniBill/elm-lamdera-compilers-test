@@ -10,7 +10,7 @@ import BuildTask exposing (BuildTask, FileOrDirectory)
 import Cli.Option as Option
 import Cli.OptionsParser as OptionsParser
 import Cli.Program as Program
-import CompilerTestBuildfile exposing (Package)
+import CompilerTestBuildfile
 import FastSet as Set exposing (Set)
 import FatalError exposing (FatalError)
 import Hash
