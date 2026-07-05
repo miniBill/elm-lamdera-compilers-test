@@ -181,21 +181,38 @@ buildAction { missing, packages } =
                                                         BuildTask.succeed Nothing
 
                                                     Just elmTestPath ->
-                                                        BuildTask.do (BuildTask.Unsafe.commandInWritableDirectoryOutput elmTestPath (commonElmTestOptions ++ [ "--compiler", "elm-0.19.1" ]) downloaded) <| \elm_0_19_1_result ->
-                                                        BuildTask.do (BuildTask.Unsafe.commandInWritableDirectoryOutput elmTestPath (commonElmTestOptions ++ [ "--compiler", "elm-0.19.2" ]) downloaded) <| \elm_0_19_2_result ->
-                                                        if elm_0_19_1_result == elm_0_19_2_result then
-                                                            { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
-                                                            , hash = downloaded
-                                                            }
-                                                                |> Just
-                                                                |> BuildTask.succeed
+                                                        let
+                                                            compilerOutputsTask =
+                                                                [ "elm-0.19.1", "lamdera-1.3.2", "lamdera-1.4.0" ]
+                                                                    |> List.map
+                                                                        (\compiler ->
+                                                                            BuildTask.Unsafe.commandInWritableDirectoryOutput elmTestPath
+                                                                                (commonElmTestOptions ++ [ "--compiler", compiler ])
+                                                                                downloaded
+                                                                                |> BuildTask.withEnv [ ( "ELM_HOME", "./elm-home-for-" ++ compiler ) ]
+                                                                                |> BuildTask.map (\r -> ( compiler, r ))
+                                                                        )
+                                                                    |> BuildTask.combine
+                                                        in
+                                                        BuildTask.do compilerOutputsTask <| \compilerOutputs ->
+                                                        case List.Extra.uniqueBy Tuple.second compilerOutputs of
+                                                            [] ->
+                                                                BuildTask.fail "No compiler outputs"
 
-                                                        else
-                                                            Diff.diffLinesWith Diff.defaultOptions
-                                                                (formatJson elm_0_19_1_result)
-                                                                (formatJson elm_0_19_2_result)
-                                                                |> Diff.ToString.diffToString { context = 3, color = True }
-                                                                |> BuildTask.fail
+                                                            [ _ ] ->
+                                                                { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
+                                                                , hash = downloaded
+                                                                }
+                                                                    |> Just
+                                                                    |> BuildTask.succeed
+
+                                                            ( c1, r1 ) :: ( c2, r2 ) :: _ ->
+                                                                Diff.diffLinesWith Diff.defaultOptions
+                                                                    (formatJson r1)
+                                                                    (formatJson r2)
+                                                                    |> Diff.ToString.diffToString { context = 3, color = True }
+                                                                    |> (++) (c1 ++ " vs " ++ c2)
+                                                                    |> BuildTask.fail
                 in
                 task
                     |> BuildTask.toResult
