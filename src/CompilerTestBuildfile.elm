@@ -153,14 +153,14 @@ buildAction { missing, packages } =
                                                                         Elm.Constraint.toString v
                                                                 in
                                                                 if String.endsWith "v < 2.0.0" constraintString then
-                                                                    -- "/home/minibill/src/miniBill/elm-lamdera-compilers-test/node_modules/.bin/elm-test"
+                                                                    -- "./node_modules/.bin/elm-test"
                                                                     --     |> Just
                                                                     --     |> BuildTask.succeed
                                                                     BuildTask.succeed Nothing
                                                                         |> BuildTask.withWarning "elm-test 1 not supported (yet - PRs welcome)"
 
                                                                 else if String.endsWith "v < 3.0.0" constraintString then
-                                                                    "/home/minibill/src/miniBill/elm-lamdera-compilers-test/node_modules/.bin/elm-test-rs"
+                                                                    "elm-test-rs"
                                                                         |> Just
                                                                         |> BuildTask.succeed
 
