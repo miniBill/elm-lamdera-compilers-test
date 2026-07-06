@@ -166,14 +166,6 @@ buildAction { missing, packages } =
 
                                                                 else
                                                                     BuildTask.fail ("Unrecognized elm-explorations/test version: " ++ constraintString)
-
-                                                    commonElmTestOptions : List String
-                                                    commonElmTestOptions =
-                                                        [ "--report"
-                                                        , "json"
-                                                        , "--seed"
-                                                        , "123456789"
-                                                        ]
                                                 in
                                                 BuildTask.do elmTestPathTask <| \elmTestPathMaybe ->
                                                 case elmTestPathMaybe of
@@ -183,13 +175,24 @@ buildAction { missing, packages } =
                                                     Just elmTestPath ->
                                                         let
                                                             compilerOutputsTask =
-                                                                [ "elm-0.19.1", "lamdera-1.3.2", "lamdera-1.4.0" ]
+                                                                [ "elm-0.19.1"
+                                                                , "elm-0.19.2"
+                                                                , "lamdera-1.3.2"
+                                                                , "lamdera-1.4.0"
+                                                                ]
                                                                     |> List.map
                                                                         (\compiler ->
                                                                             BuildTask.Unsafe.commandInWritableDirectoryOutput elmTestPath
-                                                                                (commonElmTestOptions ++ [ "--compiler", compiler ])
+                                                                                [ "--report"
+                                                                                , "json"
+                                                                                , "--seed"
+                                                                                , "123456789"
+                                                                                , "--compiler"
+                                                                                , compiler
+                                                                                ]
                                                                                 downloaded
                                                                                 |> BuildTask.withEnv [ ( "ELM_HOME", "./elm-home-for-" ++ compiler ) ]
+                                                                                |> BuildTask.toResult
                                                                                 |> BuildTask.map (\r -> ( compiler, r ))
                                                                         )
                                                                     |> BuildTask.combine
@@ -206,7 +209,13 @@ buildAction { missing, packages } =
                                                                     |> Just
                                                                     |> BuildTask.succeed
 
-                                                            ( c1, r1 ) :: ( c2, r2 ) :: _ ->
+                                                            ( c1, Err e1 ) :: _ ->
+                                                                BuildTask.fail ("Compilation failed for " ++ c1 ++ ": " ++ Debug.toString e1)
+
+                                                            _ :: ( c2, Err e2 ) :: _ ->
+                                                                BuildTask.fail ("Compilation failed for " ++ c2 ++ ": " ++ Debug.toString e2)
+
+                                                            ( c1, Ok r1 ) :: ( c2, Ok r2 ) :: _ ->
                                                                 Diff.diffLinesWith Diff.defaultOptions
                                                                     (formatJson r1)
                                                                     (formatJson r2)
