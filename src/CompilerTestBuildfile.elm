@@ -243,6 +243,7 @@ runTestsForPackage elmJson downloaded =
                             (\compiler ->
                                 BuildTask.Unsafe.commandInWritableDirectoryOutputWith
                                     (CommandOptions.default
+                                        |> CommandOptions.withOutput Stream.MergeStderrAndStdout
                                         |> CommandOptions.allowNon0Status
                                     )
                                     elmTestPath
@@ -266,7 +267,7 @@ runTestsForPackage elmJson downloaded =
                                                 , body =
                                                     case e.recoverable of
                                                         Stream.StreamError internal ->
-                                                            "Internal error: " ++ internal
+                                                            "Command failed with an internal stream error: " ++ internal
 
                                                         Stream.CustomError _ body ->
                                                             Maybe.withDefault "<no body>" body
