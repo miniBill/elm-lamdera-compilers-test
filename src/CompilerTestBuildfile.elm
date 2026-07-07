@@ -161,6 +161,7 @@ handlePackage package =
 
 runTestsForPackage : Elm.Project.PackageInfo -> FileOrDirectory -> BuildTask FatalError (Maybe { filename : Path, hash : FileOrDirectory })
 runTestsForPackage elmJson downloaded =
+    BuildTask.do pwdTask <| \pwd ->
     let
         elmTestPathTask : BuildTask FatalError (Maybe String)
         elmTestPathTask =
@@ -180,31 +181,9 @@ runTestsForPackage elmJson downloaded =
                             Elm.Constraint.toString v
                     in
                     if String.endsWith "v < 2.0.0" constraintString then
-                        BuildTask.do (Internal.hashFromString "pwd") <| \outputHash ->
-                        BuildTask.do
-                            (Internal.derive "pwd"
-                                outputHash
-                                (\{ buildPath } target ->
-                                    Script.command "pwd" []
-                                        |> BackendTask.andThen
-                                            (\pwd ->
-                                                Script.writeFile
-                                                    { path = Hash.toPathTemporary buildPath target
-                                                    , body = pwd
-                                                    }
-                                                    |> BackendTask.allowFatal
-                                            )
-                                        |> BackendTask.mapError Internal.InternalError
-                                )
-                            )
-                        <| \pwdFile ->
-                        BuildTask.withFile pwdFile
-                            (\pwd ->
-                                (String.trim pwd ++ "/node_modules/.bin/elm-test")
-                                    |> Just
-                                    |> BuildTask.succeed
-                            )
-                            |> BuildTask.allowFatal
+                        (pwd ++ "/node_modules/.bin/elm-test")
+                            |> Just
+                            |> BuildTask.succeed
 
                     else if String.endsWith "v < 3.0.0" constraintString then
                         "elm-test-rs"
@@ -246,7 +225,7 @@ runTestsForPackage elmJson downloaded =
                                     , compiler
                                     ]
                                     downloaded
-                                    |> BuildTask.withEnv [ ( "ELM_HOME", "./elm-home-for-" ++ compiler ) ]
+                                    |> BuildTask.withEnv [ ( "ELM_HOME", pwd ++ "/elm-homes/" ++ compiler ) ]
                                     |> BuildTask.map
                                         (\r ->
                                             ( compiler
@@ -319,6 +298,31 @@ runTestsForPackage elmJson downloaded =
                         , body = body
                         }
                         |> BuildTask.fail
+
+
+pwdTask : BuildTask FatalError String
+pwdTask =
+    (BuildTask.do (Internal.hashFromString "pwd") <| \outputHash ->
+    BuildTask.do
+        (Internal.derive "pwd"
+            outputHash
+            (\{ buildPath } target ->
+                Script.command "pwd" []
+                    |> BackendTask.andThen
+                        (\pwd ->
+                            Script.writeFile
+                                { path = Hash.toPathTemporary buildPath target
+                                , body = pwd
+                                }
+                                |> BackendTask.allowFatal
+                        )
+                    |> BackendTask.mapError Internal.InternalError
+            )
+        )
+    <| \pwdFile ->
+    BuildTask.withFile pwdFile (\pwd -> BuildTask.succeed (String.trim pwd))
+    )
+        |> BuildTask.allowFatal
 
 
 replaceDuration : String -> String
