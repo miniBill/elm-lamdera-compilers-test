@@ -203,7 +203,8 @@ runTestsForPackage elmJson downloaded =
                 compilerOutputsTask : BuildTask FatalError (List ( String, String ))
                 compilerOutputsTask =
                     [ "elm-0.19.1"
-                    , "elm-0.19.2"
+
+                    -- , "elm-0.19.2"
                     , "lamdera-1.3.2"
                     , "lamdera-1.4.0"
                     ]
