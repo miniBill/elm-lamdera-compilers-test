@@ -3,6 +3,7 @@ module CompilerTestBuildfile exposing (Inputs, Package, buildAction, getInput)
 import BackendTask exposing (BackendTask)
 import BackendTask.File as File
 import BackendTask.Http as Http
+import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Do as Do
 import BuildTask.Tar
@@ -208,7 +209,11 @@ runTestsForPackage elmJson downloaded =
                     ]
                         |> List.map
                             (\compiler ->
-                                BuildTask.Unsafe.commandInWritableDirectoryOutput elmTestPath
+                                BuildTask.Unsafe.commandInWritableDirectoryOutputWith
+                                    (Stream.defaultCommandOptions
+                                        |> Stream.allowNon0Status
+                                    )
+                                    elmTestPath
                                     [ "--report"
                                     , "json"
                                     , "--seed"
@@ -222,8 +227,18 @@ runTestsForPackage elmJson downloaded =
                                     |> BuildTask.mapError
                                         (\e ->
                                             FatalError.build
-                                                { title = "Compilation of " ++ Elm.Package.toString elmJson.name ++ " failed for " ++ compiler
-                                                , body = Debug.toString e.recoverable
+                                                { title =
+                                                    "Compilation of "
+                                                        ++ Elm.Package.toString elmJson.name
+                                                        ++ " failed for "
+                                                        ++ compiler
+                                                , body =
+                                                    case e.recoverable of
+                                                        Stream.StreamError internal ->
+                                                            "Internal error: " ++ internal
+
+                                                        Stream.CustomError _ body ->
+                                                            Maybe.withDefault "<no body>" body
                                                 }
                                         )
                             )
