@@ -1,7 +1,7 @@
 {
     "license": "BSD-3-Clause",
     "scripts": {
-        "start": "elm-pages run src/Main.elm --output ./out --build ./build"
+        "start": "elm-pages run src/Main.elm --output ./out --build ../elm-lamdera-compilers-test-repos"
     },
     "devDependencies": {
         "elm-pages": "^3.5.1",
