@@ -224,7 +224,15 @@ runTestsForPackage elmJson downloaded =
                                     ]
                                     downloaded
                                     |> BuildTask.withEnv [ ( "ELM_HOME", "./elm-home-for-" ++ compiler ) ]
-                                    |> BuildTask.map (\r -> ( compiler, r ))
+                                    |> BuildTask.map
+                                        (\r ->
+                                            ( compiler
+                                            , r
+                                                |> String.lines
+                                                |> List.Extra.last
+                                                |> Maybe.withDefault r
+                                            )
+                                        )
                                     |> BuildTask.mapError
                                         (\e ->
                                             FatalError.build
