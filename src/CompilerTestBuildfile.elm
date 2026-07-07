@@ -140,10 +140,7 @@ handlePackage package =
                     |> BuildTask.succeed
 
             else
-                Do.allowFatal
-                    (BuildTask.Unsafe.commandInReadonlyDirectory "cat" [ "elm.json" ] downloaded)
-                <| \elmJsonFile ->
-                Do.allowFatal (BuildTask.withFile elmJsonFile BuildTask.succeed) <| \elmJsonString ->
+                Do.allowFatal (BuildTask.readFromDirectory downloaded "elm.json") <| \elmJsonString ->
                 case Json.Decode.decodeString Elm.Project.decoder elmJsonString of
                     Err e ->
                         Json.Decode.errorToString e
