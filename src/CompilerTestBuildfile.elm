@@ -6,6 +6,7 @@ import BackendTask.Http as Http
 import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Do as Do
+import BuildTask.Gzip
 import BuildTask.Internal as Internal
 import BuildTask.Tar
 import BuildTask.Unsafe
@@ -415,7 +416,7 @@ downloadPackage package =
                     BuildTask.succeed ""
     in
     Do.allowFatal (BuildTask.Unsafe.downloadImmutable url) <| \tarGz ->
-    Do.allowFatal (BuildTask.Unsafe.pipeThrough "gunzip" [] tarGz) <| \tar ->
+    Do.allowFatal (BuildTask.Gzip.gunzip tarGz) <| \tar ->
     BuildTask.do (BuildTask.Tar.listContents tar) <| \contents ->
     BuildTask.do (getRoot contents) <| \root ->
     let
