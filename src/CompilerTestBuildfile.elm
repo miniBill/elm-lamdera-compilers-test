@@ -274,7 +274,14 @@ runTestsForPackage elmJson downloaded =
                                 |> Diff.ToString.diffToString { context = 3, color = True }
                     in
                     FatalError.build
-                        { title = "Difference between " ++ c1 ++ " and " ++ c2
+                        { title =
+                            Elm.Package.toString elmJson.name
+                                ++ "@"
+                                ++ Version.toString elmJson.version
+                                ++ " Difference between "
+                                ++ c1
+                                ++ " and "
+                                ++ c2
                         , body = body
                         }
                         |> BuildTask.fail
