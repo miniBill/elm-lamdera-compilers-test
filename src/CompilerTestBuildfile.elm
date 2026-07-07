@@ -10,6 +10,8 @@ import BuildTask.Gzip
 import BuildTask.Internal as Internal
 import BuildTask.Tar
 import BuildTask.Unsafe
+import Bytes.Encode
+import CommandOptions
 import Diff
 import Diff.ToString
 import Elm.Constraint
@@ -18,6 +20,8 @@ import Elm.Project
 import Elm.Version as Version
 import FatalError exposing (FatalError)
 import Hash
+import Hex
+import Hex.Convert
 import Json.Decode
 import Json.Encode
 import List.Extra
@@ -238,8 +242,8 @@ runTestsForPackage elmJson downloaded =
                         |> List.map
                             (\compiler ->
                                 BuildTask.Unsafe.commandInWritableDirectoryOutputWith
-                                    (Stream.defaultCommandOptions
-                                     -- |> Stream.allowNon0Status
+                                    (CommandOptions.default
+                                        |> CommandOptions.allowNon0Status
                                     )
                                     elmTestPath
                                     [ "--report"
@@ -363,9 +367,64 @@ durationRegex =
 
 formatJson : String -> String
 formatJson f =
+    let
+        isPrintable : Char -> Bool
+        isPrintable c =
+            let
+                code : Int
+                code =
+                    Char.toCode c
+            in
+            -- Crude heuristic
+            0x20 <= code && code < 0x7F
+    in
     case Json.Decode.decodeString Json.Decode.value f of
         Err _ ->
-            f
+            if String.all isPrintable f then
+                f
+
+            else
+                f
+                    |> Bytes.Encode.string
+                    |> Bytes.Encode.encode
+                    |> Hex.Convert.toString
+                    |> Hex.Convert.blocks 2
+                    |> List.Extra.greedyGroupsOf 0x10
+                    |> List.indexedMap
+                        (\rowIndex row ->
+                            let
+                                rowString : String
+                                rowString =
+                                    String.padLeft 8 '0' (Hex.toString (rowIndex * 0x10))
+
+                                hexes : String
+                                hexes =
+                                    row
+                                        |> List.Extra.greedyGroupsOf 8
+                                        |> List.map (String.join " ")
+                                        |> String.join "  "
+
+                                maybePrintable : String
+                                maybePrintable =
+                                    row
+                                        |> List.map
+                                            (\hex ->
+                                                hex
+                                                    |> Hex.fromString
+                                                    |> Result.toMaybe
+                                                    |> Maybe.map Char.fromCode
+                                                    |> Maybe.Extra.filter isPrintable
+                                                    |> Maybe.withDefault '.'
+                                            )
+                                        |> String.fromList
+                            in
+                            [ rowString
+                            , String.padRight (16 * 3) ' ' hexes
+                            , "|" ++ maybePrintable ++ "|"
+                            ]
+                                |> String.join "  "
+                        )
+                    |> String.join "\n"
 
         Ok v ->
             Json.Encode.encode 2 v
