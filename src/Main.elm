@@ -80,7 +80,7 @@ programConfig =
 
 type alias Config inputs =
     { getInputs : BackendTask FatalError inputs
-    , buildAction : inputs -> BuildTask FileOrDirectory
+    , buildAction : inputs -> BuildTask FatalError FileOrDirectory
     , buildDirectory : Path
     , outputName : Path
     , removeStale : Bool
@@ -98,7 +98,11 @@ toTask config =
         Do.do config.getInputs <| \inputs ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
         Do.exec "mkdir" [ "-p", Path.toString config.buildDirectory ] <| \_ ->
-        Do.do (BuildTask.run { check = False, jobs = config.jobs, debug = config.debug, hashKind = config.hashKind } config.buildDirectory (config.buildAction inputs)) <| \combined ->
+        Do.do
+            (BuildTask.run { check = False, jobs = config.jobs, debug = config.debug, hashKind = config.hashKind } config.buildDirectory (config.buildAction inputs)
+                |> BackendTask.mapError buildErrorToFatalError
+            )
+        <| \combined ->
         Do.exec "rm" [ "-f", Path.toString config.outputName ] <| \_ ->
         symlink
             { source = config.outputName
@@ -158,6 +162,16 @@ toTask config =
 
         else
             Script.log (String.fromInt (Set.size unexpected) ++ " stale files in the build directory")
+
+
+buildErrorToFatalError : BuildTask.Error FatalError -> FatalError
+buildErrorToFatalError e =
+    case e of
+        BuildTask.InternalError i ->
+            i
+
+        BuildTask.UserError u ->
+            u
 
 
 plural : Int -> String -> String -> String

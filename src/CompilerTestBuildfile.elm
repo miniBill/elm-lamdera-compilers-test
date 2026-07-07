@@ -3,7 +3,9 @@ module CompilerTestBuildfile exposing (Inputs, Package, buildAction, getInput)
 import BackendTask exposing (BackendTask)
 import BackendTask.File as File
 import BackendTask.Http as Http
+import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
+import BuildTask.Do as Do
 import BuildTask.Tar
 import BuildTask.Unsafe
 import BuildTask.Unsafe.Do
@@ -79,7 +81,7 @@ getInput =
         )
 
 
-buildAction : Inputs -> BuildTask FileOrDirectory
+buildAction : Inputs -> BuildTask FatalError FileOrDirectory
 buildAction { missing, packages } =
     let
         packagesCount : Int
@@ -101,7 +103,7 @@ buildAction { missing, packages } =
                             ++ packageToString package
                             ++ " "
 
-                    task : BuildTask (Maybe { filename : Path, hash : FileOrDirectory })
+                    task : BuildTask FatalError (Maybe { filename : Path, hash : FileOrDirectory })
                     task =
                         if List.member package missing then
                             BuildTask.succeed Nothing
@@ -122,24 +124,28 @@ buildAction { missing, packages } =
                                             |> BuildTask.succeed
 
                                     else
-                                        BuildTask.do
+                                        Do.allowFatal
                                             (BuildTask.Unsafe.commandInReadonlyDirectory "pwd" [] downloaded)
                                         <| \pwdFile ->
-                                        BuildTask.do (BuildTask.withFile pwdFile BuildTask.succeed) <| \pwdString ->
-                                        BuildTask.do
+                                        Do.allowFatal (BuildTask.withFile pwdFile BuildTask.succeed) <| \pwdString ->
+                                        Do.allowFatal
                                             (BuildTask.Unsafe.commandInReadonlyDirectory "cat" [ "elm.json" ] downloaded)
                                         <| \elmJsonFile ->
-                                        BuildTask.do (BuildTask.withFile elmJsonFile BuildTask.succeed) <| \elmJsonString ->
+                                        Do.allowFatal (BuildTask.withFile elmJsonFile BuildTask.succeed) <| \elmJsonString ->
                                         case Json.Decode.decodeString Elm.Project.decoder elmJsonString of
                                             Err e ->
-                                                BuildTask.fail (Json.Decode.errorToString e)
+                                                Json.Decode.errorToString e
+                                                    |> FatalError.fromString
+                                                    |> BuildTask.fail
 
                                             Ok (Elm.Project.Application _) ->
-                                                BuildTask.fail "Unexpected application-style elm.json"
+                                                "Unexpected application-style elm.json"
+                                                    |> FatalError.fromString
+                                                    |> BuildTask.fail
 
                                             Ok (Elm.Project.Package elmJson) ->
                                                 let
-                                                    elmTestPathTask : BuildTask (Maybe String)
+                                                    elmTestPathTask : BuildTask FatalError (Maybe String)
                                                     elmTestPathTask =
                                                         case List.Extra.find (\( name, _ ) -> Just name == Elm.Package.fromString "elm-explorations/test") elmJson.testDeps of
                                                             Nothing ->
@@ -165,7 +171,9 @@ buildAction { missing, packages } =
                                                                         |> BuildTask.succeed
 
                                                                 else
-                                                                    BuildTask.fail ("Unrecognized elm-explorations/test version: " ++ constraintString)
+                                                                    ("Unrecognized elm-explorations/test version: " ++ constraintString)
+                                                                        |> FatalError.fromString
+                                                                        |> BuildTask.fail
                                                 in
                                                 BuildTask.do elmTestPathTask <| \elmTestPathMaybe ->
                                                 case elmTestPathMaybe of
@@ -174,6 +182,7 @@ buildAction { missing, packages } =
 
                                                     Just elmTestPath ->
                                                         let
+                                                            compilerOutputsTask : BuildTask FatalError (List ( String, String ))
                                                             compilerOutputsTask =
                                                                 [ "elm-0.19.1"
                                                                 , "elm-0.19.2"
@@ -192,15 +201,23 @@ buildAction { missing, packages } =
                                                                                 ]
                                                                                 downloaded
                                                                                 |> BuildTask.withEnv [ ( "ELM_HOME", "./elm-home-for-" ++ compiler ) ]
-                                                                                |> BuildTask.toResult
                                                                                 |> BuildTask.map (\r -> ( compiler, r ))
+                                                                                |> BuildTask.mapError
+                                                                                    (\e ->
+                                                                                        FatalError.build
+                                                                                            { title = "Compilation failed for " ++ compiler
+                                                                                            , body = Debug.toString e.recoverable
+                                                                                            }
+                                                                                    )
                                                                         )
                                                                     |> BuildTask.combine
                                                         in
                                                         BuildTask.do compilerOutputsTask <| \compilerOutputs ->
                                                         case List.Extra.uniqueBy Tuple.second compilerOutputs of
                                                             [] ->
-                                                                BuildTask.fail "No compiler outputs"
+                                                                "No compiler outputs"
+                                                                    |> FatalError.fromString
+                                                                    |> BuildTask.fail
 
                                                             [ _ ] ->
                                                                 { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
@@ -209,31 +226,22 @@ buildAction { missing, packages } =
                                                                     |> Just
                                                                     |> BuildTask.succeed
 
-                                                            ( c1, Err e1 ) :: _ ->
-                                                                BuildTask.fail ("Compilation failed for " ++ c1 ++ ": " ++ Debug.toString e1)
-
-                                                            _ :: ( c2, Err e2 ) :: _ ->
-                                                                BuildTask.fail ("Compilation failed for " ++ c2 ++ ": " ++ Debug.toString e2)
-
-                                                            ( c1, Ok r1 ) :: ( c2, Ok r2 ) :: _ ->
-                                                                Diff.diffLinesWith Diff.defaultOptions
-                                                                    (formatJson r1)
-                                                                    (formatJson r2)
-                                                                    |> Diff.ToString.diffToString { context = 3, color = True }
-                                                                    |> (++) (c1 ++ " vs " ++ c2)
+                                                            ( c1, r1 ) :: ( c2, r2 ) :: _ ->
+                                                                let
+                                                                    body : String
+                                                                    body =
+                                                                        Diff.diffLinesWith Diff.defaultOptions
+                                                                            (formatJson r1)
+                                                                            (formatJson r2)
+                                                                            |> Diff.ToString.diffToString { context = 3, color = True }
+                                                                in
+                                                                FatalError.build
+                                                                    { title = "Difference between " ++ c1 ++ " and " ++ c2
+                                                                    , body = body
+                                                                    }
                                                                     |> BuildTask.fail
                 in
                 task
-                    |> BuildTask.toResult
-                    |> BuildTask.andThen
-                        (\v ->
-                            case v of
-                                Ok o ->
-                                    BuildTask.succeed o
-
-                                Err e ->
-                                    BuildTask.fail (Debug.toString e)
-                        )
                     |> BuildTask.withPrefix prefix
             )
         |> BuildTask.combine
@@ -243,6 +251,7 @@ buildAction { missing, packages } =
                     |> Maybe.Extra.values
                     |> BuildTask.combineInto
             )
+        |> BuildTask.andThen (\_ -> BuildTask.writeFile "TODO" |> BuildTask.allowFatal)
 
 
 formatJson : String -> String
@@ -289,7 +298,7 @@ packageFromString raw =
             Err ("Could not split package author/name and version in " ++ escape raw)
 
 
-downloadPackage : Package -> BuildTask (Result String ( FileOrDirectory, Bool ))
+downloadPackage : Package -> BuildTask FatalError (Result String ( FileOrDirectory, Bool ))
 downloadPackage package =
     let
         url : String
@@ -304,7 +313,7 @@ downloadPackage package =
                 ]
                 []
 
-        getRoot : List String -> BuildTask String
+        getRoot : List String -> BuildTask FatalError String
         getRoot contents =
             case contents of
                 firstLine :: _ ->
@@ -313,14 +322,16 @@ downloadPackage package =
                             BuildTask.succeed root
 
                         _ ->
-                            BuildTask.fail ("Unexpected first content line: " ++ escape firstLine)
+                            ("Unexpected first content line: " ++ escape firstLine)
+                                |> FatalError.fromString
+                                |> BuildTask.fail
 
                 [] ->
                     -- Empty file, root is irrelevant
                     BuildTask.succeed ""
     in
-    BuildTask.Unsafe.Do.downloadImmutable url <| \tarGz ->
-    BuildTask.Unsafe.Do.pipeThrough "gunzip" [] tarGz <| \tar ->
+    Do.allowFatal (BuildTask.Unsafe.downloadImmutable url) <| \tarGz ->
+    Do.allowFatal (BuildTask.Unsafe.pipeThrough "gunzip" [] tarGz) <| \tar ->
     BuildTask.do (BuildTask.Tar.listContents tar) <| \contents ->
     BuildTask.do (getRoot contents) <| \root ->
     let
@@ -356,7 +367,7 @@ downloadPackage package =
     in
     case toExtract of
         Err e ->
-            BuildTask.fail e
+            BuildTask.fail (FatalError.fromString e)
 
         Ok list ->
             if List.Extra.notMember "elm.json" list then
