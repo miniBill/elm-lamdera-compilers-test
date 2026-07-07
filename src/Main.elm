@@ -70,6 +70,10 @@ programConfig =
                         |> Option.withDescription "Output debug info"
                     )
                 |> OptionsParser.with
+                    (Option.flag "keep-failed"
+                        |> Option.withDescription "Keep intermediate folder of failed commands"
+                    )
+                |> OptionsParser.with
                     (Option.optionalKeywordArg "hash-kind"
                         |> Option.withDescription "Kind of hash to use. Choose fast for FNV1a, secure for sha256."
                         |> Option.withDefault "fast"
@@ -86,6 +90,7 @@ type alias Config inputs =
     , removeStale : Bool
     , jobs : Maybe Int
     , debug : Bool
+    , keepFailed : Bool
     , hashKind : Hash.Kind
     }
 
@@ -99,7 +104,15 @@ toTask config =
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
         Do.exec "mkdir" [ "-p", Path.toString config.buildDirectory ] <| \_ ->
         Do.do
-            (BuildTask.run { check = False, jobs = config.jobs, debug = config.debug, hashKind = config.hashKind } config.buildDirectory (config.buildAction inputs)
+            (BuildTask.run
+                { check = False
+                , jobs = config.jobs
+                , debug = config.debug
+                , hashKind = config.hashKind
+                , keepFailed = config.keepFailed
+                }
+                config.buildDirectory
+                (config.buildAction inputs)
                 |> BackendTask.mapError buildErrorToFatalError
             )
         <| \combined ->
