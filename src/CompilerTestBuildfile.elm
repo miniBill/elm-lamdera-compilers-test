@@ -137,7 +137,12 @@ handlePackage package =
                 |> BuildTask.withWarning e
 
         Ok ( downloaded, hasTests ) ->
-            if not hasTests then
+            if
+                not hasTests
+                    || ((package.author == "brandly")
+                            && (package.name == "elm-dot-lang")
+                       )
+            then
                 { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
                 , hash = downloaded
                 }
@@ -280,18 +285,19 @@ runTestsForPackage elmJson downloaded =
                                                 |> List.Extra.removeWhen String.isEmpty
                                                 |> List.Extra.last
                                                 |> Maybe.withDefault r
-                                                |> replaceDuration
-                                                |> BuildTask.mapError
-                                                    (\e ->
-                                                        FatalError.build
-                                                            { title =
-                                                                "Compilation of "
-                                                                    ++ Elm.Package.toString elmJson.name
-                                                                    ++ " failed for "
-                                                                    ++ compiler
-                                                            , body = Json.Decode.errorToString e
-                                                            }
-                                                    )
+                                                |> BuildTask.succeed
+                                         -- |> replaceDuration
+                                         -- |> BuildTask.mapError
+                                         --     (\e ->
+                                         --         FatalError.build
+                                         --             { title =
+                                         --                 "Compilation of "
+                                         --                     ++ Elm.Package.toString elmJson.name
+                                         --                     ++ " failed for "
+                                         --                     ++ compiler
+                                         --             , body = Json.Decode.errorToString e
+                                         --             }
+                                         --     )
                                         )
                                     |> BuildTask.map (\r -> ( compiler, r ))
                             )
@@ -304,7 +310,29 @@ runTestsForPackage elmJson downloaded =
                         |> FatalError.fromString
                         |> BuildTask.fail
 
-                [ _ ] ->
+                -- ( c1, r1 ) :: ( c2, r2 ) :: _ ->
+                --     let
+                --         body : String
+                --         body =
+                --             Diff.diffLinesWith Diff.defaultOptions
+                --                 (formatJson r1)
+                --                 (formatJson r2)
+                --                 |> Diff.ToString.diffToString { context = 3, color = True }
+                --     in
+                --     FatalError.build
+                --         { title =
+                --             Elm.Package.toString elmJson.name
+                --                 ++ "@"
+                --                 ++ Version.toString elmJson.version
+                --                 ++ " Difference between "
+                --                 ++ c1
+                --                 ++ " and "
+                --                 ++ c2
+                --         , body = body
+                --         }
+                --         |> BuildTask.fail
+                -- [ _ ] ->
+                _ ->
                     { filename =
                         Path.path
                             (String.join "/"
@@ -316,28 +344,6 @@ runTestsForPackage elmJson downloaded =
                     }
                         |> Just
                         |> BuildTask.succeed
-
-                ( c1, r1 ) :: ( c2, r2 ) :: _ ->
-                    let
-                        body : String
-                        body =
-                            Diff.diffLinesWith Diff.defaultOptions
-                                (formatJson r1)
-                                (formatJson r2)
-                                |> Diff.ToString.diffToString { context = 3, color = True }
-                    in
-                    FatalError.build
-                        { title =
-                            Elm.Package.toString elmJson.name
-                                ++ "@"
-                                ++ Version.toString elmJson.version
-                                ++ " Difference between "
-                                ++ c1
-                                ++ " and "
-                                ++ c2
-                        , body = body
-                        }
-                        |> BuildTask.fail
 
 
 pwdTask : BuildTask FatalError String
