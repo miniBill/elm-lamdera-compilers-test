@@ -282,9 +282,14 @@ runTestsForPackage elmJson downloaded =
                                                 |> replaceDuration
                                                 |> BuildTask.mapError
                                                     (\e ->
-                                                        e
-                                                            |> Json.Decode.errorToString
-                                                            |> FatalError.fromString
+                                                        FatalError.build
+                                                            { title =
+                                                                "Compilation of "
+                                                                    ++ Elm.Package.toString elmJson.name
+                                                                    ++ " failed for "
+                                                                    ++ compiler
+                                                            , body = Json.Decode.errorToString e
+                                                            }
                                                     )
                                         )
                                     |> BuildTask.map (\r -> ( compiler, r ))
