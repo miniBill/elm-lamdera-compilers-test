@@ -174,24 +174,29 @@ runTestsForPackage elmJson downloaded =
                                     (Elm.Project.encode (Elm.Project.Package elmJson))
                             )
 
-                Just ( _, v ) ->
+                Just ( _, elmTestConstraint ) ->
                     let
-                        constraintString : String
-                        constraintString =
-                            Elm.Constraint.toString v
+                        check : String -> Bool
+                        check versionString =
+                            case Version.fromString versionString of
+                                Nothing ->
+                                    False
+
+                                Just version ->
+                                    Elm.Constraint.check version elmTestConstraint
                     in
-                    if String.endsWith "v < 2.0.0" constraintString then
+                    if List.any check [ "1.0.0", "1.1.0", "1.2.0", "1.2.1", "1.2.2" ] then
                         (pwd ++ "/node_modules/.bin/elm-test")
                             |> Just
                             |> BuildTask.succeed
 
-                    else if String.endsWith "v < 3.0.0" constraintString then
+                    else if List.any check [ "2.0.0", "2.0.1", "2.1.0", "2.1.1", "2.1.2", "2.2.0", "2.2.1" ] then
                         "elm-test-rs"
                             |> Just
                             |> BuildTask.succeed
 
                     else
-                        ("Unrecognized elm-explorations/test version: " ++ constraintString)
+                        ("Unrecognized elm-explorations/test version: " ++ Elm.Constraint.toString elmTestConstraint)
                             |> FatalError.fromString
                             |> BuildTask.fail
     in
