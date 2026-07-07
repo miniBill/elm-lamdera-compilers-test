@@ -6,6 +6,7 @@ import BackendTask.Http as Http
 import BackendTask.Stream as Stream
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import BuildTask.Do as Do
+import BuildTask.Internal as Internal
 import BuildTask.Tar
 import BuildTask.Unsafe
 import Diff
@@ -20,6 +21,7 @@ import Json.Decode
 import Json.Encode
 import List.Extra
 import Maybe.Extra
+import Pages.Script as Script
 import Path exposing (Path)
 import Regex exposing (Regex)
 import Result.Extra
@@ -178,11 +180,31 @@ runTestsForPackage elmJson downloaded =
                             Elm.Constraint.toString v
                     in
                     if String.endsWith "v < 2.0.0" constraintString then
-                        -- "./node_modules/.bin/elm-test"
-                        --     |> Just
-                        --     |> BuildTask.succeed
-                        BuildTask.succeed Nothing
-                            |> BuildTask.withWarning "elm-test 1 not supported (yet - PRs welcome)"
+                        BuildTask.do (Internal.hashFromString "pwd") <| \outputHash ->
+                        BuildTask.do
+                            (Internal.derive "pwd"
+                                outputHash
+                                (\{ buildPath } target ->
+                                    Script.command "pwd" []
+                                        |> BackendTask.andThen
+                                            (\pwd ->
+                                                Script.writeFile
+                                                    { path = Hash.toPathTemporary buildPath target
+                                                    , body = pwd
+                                                    }
+                                                    |> BackendTask.allowFatal
+                                            )
+                                        |> BackendTask.mapError Internal.InternalError
+                                )
+                            )
+                        <| \pwdFile ->
+                        BuildTask.withFile pwdFile
+                            (\pwd ->
+                                (String.trim pwd ++ "/node_modules/.bin/elm-test")
+                                    |> Just
+                                    |> BuildTask.succeed
+                            )
+                            |> BuildTask.allowFatal
 
                     else if String.endsWith "v < 3.0.0" constraintString then
                         "elm-test-rs"
