@@ -157,12 +157,17 @@ handlePackage package =
                         runTestsForPackage elmJson downloaded
 
 
+type ElmTestVersion
+    = ElmTestV1
+    | ElmTestV2
+
+
 runTestsForPackage : Elm.Project.PackageInfo -> FileOrDirectory -> BuildTask FatalError (Maybe { filename : Path, hash : FileOrDirectory })
 runTestsForPackage elmJson downloaded =
     BuildTask.do pwdTask <| \pwd ->
     let
-        elmTestPathTask : BuildTask FatalError (Maybe String)
-        elmTestPathTask =
+        elmTestVersionTask : BuildTask FatalError (Maybe ElmTestVersion)
+        elmTestVersionTask =
             case List.Extra.find (\( name, _ ) -> Just name == Elm.Package.fromString "elm-explorations/test") elmJson.testDeps of
                 Nothing ->
                     BuildTask.succeed Nothing
@@ -184,40 +189,57 @@ runTestsForPackage elmJson downloaded =
                                     Elm.Constraint.check version elmTestConstraint
                     in
                     if List.any check [ "1.0.0", "1.1.0", "1.2.0", "1.2.1", "1.2.2" ] then
-                        (pwd ++ "/node_modules/.bin/elm-test")
-                            |> Just
-                            |> BuildTask.succeed
+                        BuildTask.succeed (Just ElmTestV1)
 
                     else if List.any check [ "2.0.0", "2.0.1", "2.1.0", "2.1.1", "2.1.2", "2.2.0", "2.2.1" ] then
-                        "elm-test-rs"
-                            |> Just
-                            |> BuildTask.succeed
+                        BuildTask.succeed (Just ElmTestV2)
 
                     else
                         ("Unrecognized elm-explorations/test version: " ++ Elm.Constraint.toString elmTestConstraint)
                             |> FatalError.fromString
                             |> BuildTask.fail
     in
-    BuildTask.do elmTestPathTask <| \elmTestPathMaybe ->
-    case elmTestPathMaybe of
+    BuildTask.do elmTestVersionTask <| \elmTestVersionMaybe ->
+    let
+        elmTestVersionAndPathMaybe : Maybe ( ElmTestVersion, String )
+        elmTestVersionAndPathMaybe =
+            case elmTestVersionMaybe of
+                Nothing ->
+                    Nothing
+
+                Just ElmTestV1 ->
+                    Just ( ElmTestV1, pwd ++ "/node_modules/.bin/elm-test" )
+
+                Just ElmTestV2 ->
+                    Just ( ElmTestV2, "elm-test-rs" )
+    in
+    case elmTestVersionAndPathMaybe of
         Nothing ->
             BuildTask.succeed Nothing
 
-        Just elmTestPath ->
+        Just ( elmTestVersion, elmTestPath ) ->
             let
+                compilerVersions : List String
+                compilerVersions =
+                    case elmTestVersion of
+                        ElmTestV1 ->
+                            [ "elm-0.19.1", "lamdera-1.3.2" ]
+
+                        ElmTestV2 ->
+                            [ "elm-0.19.1"
+                            , "elm-0.19.2"
+                            , "lamdera-1.3.2"
+                            , "lamdera-1.4.0"
+                            ]
+
                 compilerOutputsTask : BuildTask FatalError (List ( String, String ))
                 compilerOutputsTask =
-                    [ "elm-0.19.1"
-
-                    -- , "elm-0.19.2"
-                    , "lamdera-1.3.2"
-                    , "lamdera-1.4.0"
-                    ]
+                    compilerVersions
                         |> List.map
                             (\compiler ->
                                 BuildTask.Unsafe.commandInWritableDirectoryOutputWith
                                     (Stream.defaultCommandOptions
-                                        |> Stream.allowNon0Status
+                                     -- |> Stream.allowNon0Status
                                     )
                                     elmTestPath
                                     [ "--report"
