@@ -21,6 +21,7 @@ import Json.Encode
 import List.Extra
 import Maybe.Extra
 import Path exposing (Path)
+import Regex exposing (Regex)
 import Result.Extra
 import Url.Builder
 
@@ -229,8 +230,10 @@ runTestsForPackage elmJson downloaded =
                                             ( compiler
                                             , r
                                                 |> String.lines
+                                                |> List.Extra.removeWhen String.isEmpty
                                                 |> List.Extra.last
                                                 |> Maybe.withDefault r
+                                                |> replaceDuration
                                             )
                                         )
                                     |> BuildTask.mapError
@@ -294,6 +297,17 @@ runTestsForPackage elmJson downloaded =
                         , body = body
                         }
                         |> BuildTask.fail
+
+
+replaceDuration : String -> String
+replaceDuration s =
+    Regex.replace durationRegex (\_ -> "\"duration\": \"---\"") s
+
+
+durationRegex : Regex
+durationRegex =
+    Regex.fromString "\"duration\": *\"[0-9]+(\\.[0-9]+)?\""
+        |> Maybe.withDefault Regex.never
 
 
 formatJson : String -> String
