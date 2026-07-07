@@ -455,7 +455,12 @@ downloadPackage package =
                 let
                     hasTests : Bool
                     hasTests =
-                        List.member (root ++ "/tests/") contents
+                        List.any
+                            (\f ->
+                                String.startsWith (root ++ "/tests/") f
+                                    && String.endsWith ".elm" f
+                            )
+                            contents
                 in
                 BuildTask.do (BuildTask.Tar.extract { stripPrefix = Just root } tar list) <| \result ->
                 BuildTask.succeed (Ok ( result, hasTests ))
