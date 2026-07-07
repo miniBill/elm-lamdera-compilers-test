@@ -255,17 +255,6 @@ runTestsForPackage elmJson downloaded =
                                     ]
                                     downloaded
                                     |> BuildTask.withEnv [ ( "ELM_HOME", pwd ++ "/elm-homes/" ++ compiler ) ]
-                                    |> BuildTask.map
-                                        (\r ->
-                                            ( compiler
-                                            , r
-                                                |> String.lines
-                                                |> List.Extra.removeWhen String.isEmpty
-                                                |> List.Extra.last
-                                                |> Maybe.withDefault r
-                                                |> replaceDuration
-                                            )
-                                        )
                                     |> BuildTask.mapError
                                         (\e ->
                                             FatalError.build
@@ -283,6 +272,22 @@ runTestsForPackage elmJson downloaded =
                                                             Maybe.withDefault "<no body>" body
                                                 }
                                         )
+                                    |> BuildTask.andThen
+                                        (\r ->
+                                            r
+                                                |> String.lines
+                                                |> List.Extra.removeWhen String.isEmpty
+                                                |> List.Extra.last
+                                                |> Maybe.withDefault r
+                                                |> replaceDuration
+                                                |> BuildTask.mapError
+                                                    (\e ->
+                                                        e
+                                                            |> Json.Decode.errorToString
+                                                            |> FatalError.fromString
+                                                    )
+                                        )
+                                    |> BuildTask.map (\r -> ( compiler, r ))
                             )
                         |> BuildTask.combine
             in
@@ -354,9 +359,14 @@ pwdTask =
         |> BuildTask.allowFatal
 
 
-replaceDuration : String -> String
+replaceDuration : String -> BuildTask Json.Decode.Error String
 replaceDuration s =
-    Regex.replace durationRegex (\_ -> "\"duration\": \"---\"") s
+    case Json.Decode.decodeString Json.Decode.value s of
+        Err e ->
+            BuildTask.fail e
+
+        Ok _ ->
+            BuildTask.succeed (Regex.replace durationRegex (\_ -> "\"duration\": \"---\"") s)
 
 
 durationRegex : Regex
