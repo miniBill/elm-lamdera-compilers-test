@@ -148,9 +148,11 @@ handlePackage package =
             if
                 not hasTests
                     || List.member packageString
-                        [ "brandly/elm-dot-lang"
-                        , "AR3ON/elm-combox"
+                        [ "AR3ON/elm-combox"
                         , "Arkham/elm-rttl"
+                        , "brandly/elm-dot-lang"
+                        , "Confidenceman02/elm-animate-height"
+                        , "Confidenceman02/elm-select"
                         ]
             then
                 { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
@@ -186,7 +188,15 @@ handlePackage package =
 
 isBrokenPackage : ( Elm.Package.Name, Elm.Constraint.Constraint ) -> Bool
 isBrokenPackage ( name, _ ) =
-    Elm.Package.toString name |> String.startsWith "Skinney/"
+    let
+        nameString : String
+        nameString =
+            Elm.Package.toString name
+    in
+    [ "Skinney/"
+    , "matken11235/"
+    ]
+        |> List.any (\author -> String.startsWith author nameString)
 
 
 type ElmTestVersion
