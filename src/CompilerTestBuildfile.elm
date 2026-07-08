@@ -132,7 +132,7 @@ buildAction { missing, packages } =
                 list
                     |> Maybe.Extra.values
                     |> List.map formatChecksOutput
-                    |> (::) (String.join "\t" [ "Author", "Package", "Version", "Result", "Compiler 1", "Compiler 2", "Output 1", "Output 2" ])
+                    |> (::) "Author;Package;Version;Result;Compiler 1;Compiler 2;Output 1;Output 2"
                     |> String.join "\n"
                     |> BuildTask.writeFile
                     |> BuildTask.allowFatal
