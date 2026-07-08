@@ -150,7 +150,7 @@ handlePackage package =
                     || (package.name == "elm-speedcubing")
                     || (package.name == "french-stemmer")
                     || (package.name == "elm-cldr")
-                    || (packageString == "Ar3ON/elm-combox")
+                    || (packageString == "AR3ON/elm-combox")
             then
                 { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
                 , hash = downloaded
