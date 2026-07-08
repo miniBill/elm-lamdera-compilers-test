@@ -152,6 +152,7 @@ handlePackage package =
                     || (package.name == "french-stemmer")
                     || (package.name == "elm-cldr")
                     || (packageString == "AR3ON/elm-combox")
+                    || (packageString == "Arkham/elm-rttl")
             then
                 { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
                 , hash = downloaded
@@ -251,6 +252,17 @@ runTestsForPackage elmJson downloaded =
                             , "lamdera-1.4.0"
                             ]
 
+                elmTestArgs compiler =
+                    [ "--report"
+                    , "json"
+                    , "--seed"
+                    , Hash.toString downloaded
+                        |> FNV1a.hash
+                        |> String.fromInt
+                    , "--compiler"
+                    , compiler
+                    ]
+
                 compilerOutputsTask : BuildTask FatalError (List ( String, String ))
                 compilerOutputsTask =
                     compilerVersions
@@ -262,18 +274,11 @@ runTestsForPackage elmJson downloaded =
                                         |> CommandOptions.allowNon0Status
                                     )
                                     elmTestPath
-                                    [ "--report"
-                                    , "json"
-                                    , "--seed"
-                                    , Hash.toString downloaded
-                                        |> FNV1a.hash
-                                        |> String.fromInt
-                                    , "--compiler"
-                                    , compiler
-                                    ]
+                                    (elmTestArgs compiler)
                                     downloaded
                                     |> BuildTask.withEnv [ ( "ELM_HOME", pwd ++ "/elm-homes/" ++ compiler ) ]
                                     |> BuildTask.withMemoryLimitInGB 2
+                                    -- |> BuildTask.withDebug Debug.todo
                                     |> BuildTask.mapError
                                         (\e ->
                                             case e.recoverable of
@@ -305,9 +310,7 @@ runTestsForPackage elmJson downloaded =
                                                 , body =
                                                     [ "Testing of " ++ Elm.Package.toString elmJson.name ++ " failed for " ++ compiler
                                                     , "Command was:\n  "
-                                                        ++ elmTestPath
-                                                        ++ " --report json --seed 123456789 --compiler "
-                                                        ++ compiler
+                                                        ++ String.join " " (elmTestPath :: elmTestArgs compiler)
                                                     , e
                                                     ]
                                                         |> String.join "\n\n"
