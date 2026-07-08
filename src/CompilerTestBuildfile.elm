@@ -132,7 +132,7 @@ buildAction { missing, packages } =
                 list
                     |> Maybe.Extra.values
                     |> List.map formatChecksOutput
-                    |> (::) (String.join "\t" [ "Author", "Package", "Version", "Result" ])
+                    |> (::) (String.join "\t" [ "Author", "Package", "Version", "Result", "Compiler 1", "Compiler 2", "Output 1", "Output 2" ])
                     |> String.join "\n"
                     |> BuildTask.writeFile
                     |> BuildTask.allowFatal
@@ -141,11 +141,34 @@ buildAction { missing, packages } =
 
 formatChecksOutput : ( Package, CheckResult ) -> String
 formatChecksOutput ( package, checkResult ) =
-    [ package.author
-    , package.name
-    , package.version
-    , Debug.toString checkResult
-    ]
+    let
+        ( result, specific ) =
+            case checkResult of
+                AllOutputsAreTheSame ->
+                    ( "Pass", [] )
+
+                NoTests ->
+                    ( "No tests", [] )
+
+                DifferentOutput diff ->
+                    ( "Error - different outputs", [ diff.compiler1, diff.compiler2, diff.output1, diff.output2 ] )
+
+                DownloadFailed reason ->
+                    ( "Error - download failed", [ reason ] )
+
+                MissingElmExplorationsTestDependency ->
+                    ( "Error - no elm-explorations/test in the dependencies", [] )
+
+                NoCompilerOutputs ->
+                    ( "Internal error - no outputs", [] )
+    in
+    ([ package.author
+     , package.name
+     , package.version
+     , result
+     ]
+        ++ specific
+    )
         |> List.map Utils.escape
         |> String.join ";"
 
@@ -190,7 +213,7 @@ type ElmTestVersion
 
 type CheckResult
     = NoCompilerOutputs
-    | DifferentOutput { compiler1 : String, compiler2 : String, diff : String }
+    | DifferentOutput { compiler1 : String, compiler2 : String, output1 : String, output2 : String }
     | AllOutputsAreTheSame
     | NoTests
     | DownloadFailed String
@@ -347,11 +370,8 @@ checkCompilerOutputs compilerOutputs =
             DifferentOutput
                 { compiler1 = compiler1
                 , compiler2 = compiler2
-                , diff =
-                    Diff.diffLinesWith Diff.defaultOptions
-                        (formatJson output1)
-                        (formatJson output2)
-                        |> Diff.ToString.diffToString { context = 3, color = True }
+                , output1 = output1
+                , output2 = output2
                 }
 
         [ _ ] ->
