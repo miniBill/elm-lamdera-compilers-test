@@ -265,12 +265,6 @@ runTestsForPackage elmJson downloaded =
                                     , "json"
                                     , "--seed"
                                     , "123456789"
-                                    , case elmTestVersion of
-                                        ElmTestV1 ->
-                                            ""
-
-                                        ElmTestV2 ->
-                                            "-vvv"
                                     , "--compiler"
                                     , compiler
                                     ]
