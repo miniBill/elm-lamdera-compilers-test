@@ -139,7 +139,7 @@ handlePackage package =
             BuildTask.succeed Nothing
                 |> BuildTask.withWarning e
 
-        Ok ( downloaded, hasTests ) ->
+        Ok { downloaded, hasTests } ->
             let
                 packageString : String
                 packageString =
@@ -173,7 +173,20 @@ handlePackage package =
                             |> BuildTask.fail
 
                     Ok (Elm.Project.Package elmJson) ->
-                        runTestsForPackage elmJson downloaded
+                        if List.any isBrokenPackage elmJson.deps then
+                            { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
+                            , hash = downloaded
+                            }
+                                |> Just
+                                |> BuildTask.succeed
+
+                        else
+                            runTestsForPackage elmJson downloaded
+
+
+isBrokenPackage : ( Elm.Package.Name, Elm.Constraint.Constraint ) -> Bool
+isBrokenPackage ( name, _ ) =
+    Elm.Package.toString name |> String.startsWith "Skinney/"
 
 
 type ElmTestVersion
@@ -597,7 +610,7 @@ packageFromString raw =
             Err ("Could not split package author/name and version in " ++ escape raw)
 
 
-downloadPackage : Package -> BuildTask FatalError (Result String ( FileOrDirectory, Bool ))
+downloadPackage : Package -> BuildTask FatalError (Result String { downloaded : FileOrDirectory, hasTests : Bool })
 downloadPackage package =
     let
         url : String
@@ -684,7 +697,7 @@ downloadPackage package =
                             contents
                 in
                 BuildTask.do (BuildTask.Tar.extract { stripPrefix = Just root } tar list) <| \result ->
-                BuildTask.succeed (Ok ( result, hasTests ))
+                BuildTask.succeed (Ok { downloaded = result, hasTests = hasTests })
 
 
 escape : String -> String
