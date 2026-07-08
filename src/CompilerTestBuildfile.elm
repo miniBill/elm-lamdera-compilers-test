@@ -152,7 +152,9 @@ handlePackage package =
                         , "Arkham/elm-rttl"
                         , "brandly/elm-dot-lang"
                         , "Confidenceman02/elm-animate-height"
-                        , "Confidenceman02/elm-select"
+                        , "Confidenceman02/elm-select" -- maybe not
+                        , "FMFI-UK-1-AIN-412/elm-formula"
+                        , "Gizra/elm-attribute-builder"
                         ]
             then
                 { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
@@ -334,6 +336,7 @@ runTestsForPackage elmJson downloaded =
                                                     , "Command was:\n  "
                                                         ++ String.join " " (elmTestPath :: elmTestArgs compiler)
                                                     , e
+                                                    , "--  " ++ Elm.Package.toString elmJson.name ++ ", " ++ compiler
                                                     ]
                                                         |> String.join "\n\n"
                                                 }
@@ -387,15 +390,19 @@ runTestsForPackage elmJson downloaded =
 
 formatError : String -> String
 formatError s =
-    case Json.Decode.decodeString errorDecoder s of
-        Err e ->
-            s ++ "\nAdditionally, formatting failed because:\n" ++ Json.Decode.errorToString e
+    if String.contains "`elm make` failed with exit code 1." s then
+        s
 
-        Ok { path, title, message } ->
-            [ Ansi.Color.fontColor Ansi.Color.cyan ("-- " ++ title ++ " --------------- " ++ path)
-            , formatErrorMessage message
-            ]
-                |> String.join "\n"
+    else
+        case Json.Decode.decodeString errorDecoder s of
+            Err e ->
+                s ++ "\nAdditionally, formatting failed because:\n" ++ Json.Decode.errorToString e
+
+            Ok { path, title, message } ->
+                [ Ansi.Color.fontColor Ansi.Color.cyan ("-- " ++ title ++ " --------------- " ++ path)
+                , formatErrorMessage message
+                ]
+                    |> String.join "\n"
 
 
 formatErrorMessage : List ErrorMessageFragment -> String
