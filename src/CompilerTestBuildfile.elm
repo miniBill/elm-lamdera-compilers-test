@@ -264,6 +264,7 @@ runTestsForPackage elmJson downloaded =
                                     ]
                                     downloaded
                                     |> BuildTask.withEnv [ ( "ELM_HOME", pwd ++ "/elm-homes/" ++ compiler ) ]
+                                    |> BuildTask.withMemoryLimitInGB 2
                                     |> BuildTask.mapError
                                         (\e ->
                                             FatalError.build
