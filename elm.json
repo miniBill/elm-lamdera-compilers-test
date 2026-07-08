@@ -18,6 +18,7 @@
             "elm/time": "1.0.0",
             "elm/url": "1.0.0",
             "elmcraft/core-extra": "2.3.0",
+            "ianmackenzie/elm-units": "2.10.0",
             "jxxcarlson/hex": "4.0.1",
             "mdgriffith/elm-codegen": "6.0.3",
             "miniBill/elm-diff": "1.1.2",

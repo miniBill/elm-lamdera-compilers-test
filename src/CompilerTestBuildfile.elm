@@ -16,6 +16,7 @@ import Bytes.Encode
 import CommandOptions
 import Diff
 import Diff.ToString
+import Duration
 import Elm.Constraint
 import Elm.Package
 import Elm.Project
@@ -280,6 +281,7 @@ innerRunTestsForPackage elmJson downloaded elmTestVersion =
                             (CommandOptions.default
                                 |> CommandOptions.withOutput Stream.MergeStderrAndStdout
                                 |> CommandOptions.allowNon0Status
+                                |> CommandOptions.withTimeout Duration.minute
                             )
                             elmTestPath
                             (elmTestArgs compiler)
