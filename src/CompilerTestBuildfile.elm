@@ -22,6 +22,7 @@ import Elm.Project
 import Elm.Version as Version
 import ErrorParser
 import FNV1a
+import FastDict as Dict exposing (Dict)
 import FatalError exposing (FatalError)
 import Hash
 import Hex
@@ -35,6 +36,7 @@ import Path exposing (Path)
 import Regex exposing (Regex)
 import Result.Extra
 import Url.Builder
+import Utils
 
 
 type alias Package =
@@ -120,6 +122,7 @@ buildAction { missing, packages } =
                                 ++ " "
                     in
                     handlePackage package
+                        |> BuildTask.map (\r -> Just ( package, r ))
                         |> BuildTask.withPrefix prefix
             )
         |> BuildTask.combine
@@ -127,50 +130,31 @@ buildAction { missing, packages } =
             (\list ->
                 list
                     |> Maybe.Extra.values
-                    |> BuildTask.combineInto
+                    |> List.map formatChecksOutput
+                    |> (::) (String.join "\t" [ "Author", "Package", "Version", "Result" ])
+                    |> String.join "\n"
+                    |> BuildTask.writeFile
+                    |> BuildTask.allowFatal
             )
-        |> BuildTask.andThen (\_ -> BuildTask.writeFile "TODO" |> BuildTask.allowFatal)
 
 
-brokenPackages : List String
-brokenPackages =
-    [ "AR3ON/elm-combox"
-    , "Arkham/elm-rttl"
-    , "arowM/elm-parser-test"
-    , "arowM/elm-reference"
-    , "brandly/elm-dot-lang"
-    , "Confidenceman02/elm-animate-height"
-    , "Confidenceman02/elm-select" -- maybe not
-    , "FMFI-UK-1-AIN-412/elm-formula"
-    , "Gizra/elm-attribute-builder"
-    , "Herteby/enum"
-    , "IzumiSy/elm-firestore"
-    , "JoshuaHall/elm-fraction"
-    , "MackeyRMS/elm-accessors"
-    , "MackeyRMS/elm-rosetree-path"
-    , "MartinSStewart/elm-audio"
-    , "NoRedInk/datetimepicker-legacy"
-    , "NoRedInk/elm-rails"
-    , "NoRedInk/noredink-ui"
-    , "Orasund/elm-hyperbolic"
-    , "Orasund/elm-ui-widgets"
-    , "Orasund/leaf-lang"
-    , "Orasund/pixelengine"
-    , "PaackEng/elm-datetime-picker"
-    , "robinheghan/elm-deque"
-    , "RomanErnst/erl"
-    , "SiriusStarr/elm-password-strength"
-    , "SiriusStarr/elm-review-no-unsorted"
+formatChecksOutput : ( Package, CheckResult ) -> String
+formatChecksOutput ( package, checkResult ) =
+    [ package.author
+    , package.name
+    , package.version
+    , Debug.toString checkResult
     ]
+        |> List.map Utils.escape
+        |> String.join ";"
 
 
-handlePackage : Package -> BuildTask FatalError (Maybe { filename : Path, hash : FileOrDirectory })
+handlePackage : Package -> BuildTask FatalError CheckResult
 handlePackage package =
     BuildTask.do (downloadPackage package) <| \downloadResult ->
     case downloadResult of
         Err e ->
-            BuildTask.succeed Nothing
-                |> BuildTask.withWarning e
+            BuildTask.succeed (DownloadFailed e)
 
         Ok { downloaded, hasTests } ->
             let
@@ -178,12 +162,8 @@ handlePackage package =
                 packageString =
                     package.author ++ "/" ++ package.name
             in
-            if not hasTests || List.member packageString brokenPackages then
-                { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
-                , hash = downloaded
-                }
-                    |> Just
-                    |> BuildTask.succeed
+            if not hasTests then
+                BuildTask.succeed NoTests
 
             else
                 Do.allowFatal (BuildTask.readFromDirectory downloaded "elm.json") <| \elmJsonString ->
@@ -199,36 +179,7 @@ handlePackage package =
                             |> BuildTask.fail
 
                     Ok (Elm.Project.Package elmJson) ->
-                        if List.any isBrokenPackage elmJson.deps then
-                            { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
-                            , hash = downloaded
-                            }
-                                |> Just
-                                |> BuildTask.succeed
-
-                        else
-                            runTestsForPackage elmJson downloaded
-                                |> BuildTask.toResult
-                                |> BuildTask.map
-                                    (\_ ->
-                                        { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
-                                        , hash = downloaded
-                                        }
-                                            |> Just
-                                    )
-
-
-isBrokenPackage : ( Elm.Package.Name, Elm.Constraint.Constraint ) -> Bool
-isBrokenPackage ( name, _ ) =
-    let
-        nameString : String
-        nameString =
-            Elm.Package.toString name
-    in
-    [ "Skinney/"
-    , "matken11235/"
-    ]
-        |> List.any (\author -> String.startsWith author nameString)
+                        runTestsForPackage elmJson downloaded
 
 
 type ElmTestVersion
@@ -236,187 +187,173 @@ type ElmTestVersion
     | ElmTestV2
 
 
-runTestsForPackage : Elm.Project.PackageInfo -> FileOrDirectory -> BuildTask FatalError (Maybe { filename : Path, hash : FileOrDirectory })
+type CheckResult
+    = NoCompilerOutputs
+    | DifferentOutput { compiler1 : String, compiler2 : String, diff : String }
+    | AllOutputsAreTheSame
+    | NoTests
+    | DownloadFailed String
+    | MissingElmExplorationsTestDependency
+
+
+runTestsForPackage :
+    Elm.Project.PackageInfo
+    -> FileOrDirectory
+    -> BuildTask FatalError CheckResult
 runTestsForPackage elmJson downloaded =
     BuildTask.do pwdTask <| \pwd ->
-    let
-        elmTestVersionTask : BuildTask FatalError (Maybe ElmTestVersion)
-        elmTestVersionTask =
-            case List.Extra.find (\( name, _ ) -> Just name == Elm.Package.fromString "elm-explorations/test") elmJson.testDeps of
-                Nothing ->
-                    BuildTask.succeed Nothing
-                        |> BuildTask.withWarning
-                            ("Could not find an elm-explorations/test dependency:\n"
-                                ++ Json.Encode.encode 2
-                                    (Elm.Project.encode (Elm.Project.Package elmJson))
-                            )
-
-                Just ( _, elmTestConstraint ) ->
-                    let
-                        check : String -> Bool
-                        check versionString =
-                            case Version.fromString versionString of
-                                Nothing ->
-                                    False
-
-                                Just version ->
-                                    Elm.Constraint.check version elmTestConstraint
-                    in
-                    if List.any check [ "1.0.0", "1.1.0", "1.2.0", "1.2.1", "1.2.2" ] then
-                        BuildTask.succeed (Just ElmTestV1)
-
-                    else if List.any check [ "2.0.0", "2.0.1", "2.1.0", "2.1.1", "2.1.2", "2.2.0", "2.2.1" ] then
-                        BuildTask.succeed (Just ElmTestV2)
-
-                    else
-                        ("Unrecognized elm-explorations/test version: " ++ Elm.Constraint.toString elmTestConstraint)
-                            |> FatalError.fromString
-                            |> BuildTask.fail
-    in
-    BuildTask.do elmTestVersionTask <| \elmTestVersionMaybe ->
-    let
-        elmTestVersionAndPathMaybe : Maybe ( ElmTestVersion, String )
-        elmTestVersionAndPathMaybe =
-            case elmTestVersionMaybe of
-                Nothing ->
-                    Nothing
-
-                Just ElmTestV1 ->
-                    Just ( ElmTestV1, pwd ++ "/node_modules/.bin/elm-test" )
-
-                Just ElmTestV2 ->
-                    Just ( ElmTestV2, "elm-test-rs" )
-    in
-    case elmTestVersionAndPathMaybe of
+    case List.Extra.find (\( name, _ ) -> Just name == Elm.Package.fromString "elm-explorations/test") elmJson.testDeps of
         Nothing ->
-            BuildTask.succeed Nothing
+            BuildTask.succeed MissingElmExplorationsTestDependency
 
-        Just ( elmTestVersion, elmTestPath ) ->
+        Just ( _, elmTestConstraint ) ->
             let
-                compilerVersions : List String
-                compilerVersions =
-                    case elmTestVersion of
-                        ElmTestV1 ->
-                            [ "elm-0.19.1", "lamdera-1.3.2" ]
+                check : String -> Bool
+                check versionString =
+                    case Version.fromString versionString of
+                        Nothing ->
+                            False
 
-                        ElmTestV2 ->
-                            [ "elm-0.19.1"
-                            , "elm-0.19.2"
-                            , "lamdera-1.3.2"
-                            , "lamdera-1.4.0"
-                            ]
+                        Just version ->
+                            Elm.Constraint.check version elmTestConstraint
+            in
+            if List.any check [ "1.0.0", "1.1.0", "1.2.0", "1.2.1", "1.2.2" ] then
+                innerRunTestsForPackage elmJson downloaded ElmTestV1
 
-                elmTestArgs compiler =
-                    [ "--report"
-                    , "json"
-                    , "--seed"
-                    , Hash.toString downloaded
-                        |> FNV1a.hash
-                        |> String.fromInt
-                    , "--compiler"
-                    , compiler
+            else if List.any check [ "2.0.0", "2.0.1", "2.1.0", "2.1.1", "2.1.2", "2.2.0", "2.2.1" ] then
+                innerRunTestsForPackage elmJson downloaded ElmTestV2
+
+            else
+                ("Unrecognized elm-explorations/test version: " ++ Elm.Constraint.toString elmTestConstraint)
+                    |> FatalError.fromString
+                    |> BuildTask.fail
+
+
+innerRunTestsForPackage :
+    Elm.Project.PackageInfo
+    -> FileOrDirectory
+    -> ElmTestVersion
+    -> BuildTask FatalError CheckResult
+innerRunTestsForPackage elmJson downloaded elmTestVersion =
+    BuildTask.do pwdTask <| \pwd ->
+    let
+        elmTestPath : String
+        elmTestPath =
+            case elmTestVersion of
+                ElmTestV1 ->
+                    pwd ++ "/node_modules/.bin/elm-test"
+
+                ElmTestV2 ->
+                    "elm-test-rs"
+
+        compilerVersions : List String
+        compilerVersions =
+            case elmTestVersion of
+                ElmTestV1 ->
+                    [ "elm-0.19.1", "lamdera-1.3.2" ]
+
+                ElmTestV2 ->
+                    [ "elm-0.19.1"
+                    , "elm-0.19.2"
+                    , "lamdera-1.3.2"
+                    , "lamdera-1.4.0"
                     ]
 
-                compilerOutputsTask : BuildTask FatalError (List ( String, String ))
-                compilerOutputsTask =
-                    compilerVersions
-                        |> List.map
-                            (\compiler ->
-                                BuildTask.Unsafe.commandInWritableDirectoryOutputWith
-                                    (CommandOptions.default
-                                        |> CommandOptions.withOutput Stream.MergeStderrAndStdout
-                                        |> CommandOptions.allowNon0Status
-                                    )
-                                    elmTestPath
-                                    (elmTestArgs compiler)
-                                    downloaded
-                                    |> BuildTask.withEnv [ ( "ELM_HOME", pwd ++ "/elm-homes/" ++ compiler ) ]
-                                    |> BuildTask.withMemoryLimitInGB 2
-                                    |> BuildTask.withIdlePriority
-                                    -- |> BuildTask.withDebug Debug.todo
-                                    |> BuildTask.mapError
-                                        (\e ->
-                                            case e.recoverable of
-                                                Stream.StreamError internal ->
-                                                    "Command failed with an internal stream error: " ++ internal
+        elmTestArgs : String -> List String
+        elmTestArgs compiler =
+            [ "--report"
+            , "json"
+            , "--seed"
+            , Hash.toString downloaded
+                |> FNV1a.hash
+                |> String.fromInt
+            , "--compiler"
+            , compiler
+            ]
 
-                                                Stream.CustomError _ body ->
-                                                    Maybe.withDefault "<no body>" body
-                                        )
-                                    |> BuildTask.andThen
-                                        (\r ->
-                                            if String.contains "\"duration\"" r then
-                                                r
-                                                    |> String.lines
-                                                    |> List.Extra.removeWhen String.isEmpty
-                                                    |> List.Extra.last
-                                                    |> Maybe.withDefault r
-                                                    |> replaceDuration
-                                                    |> BuildTask.mapError Json.Decode.errorToString
-
-                                            else
-                                                formatError r
-                                                    |> BuildTask.fail
-                                        )
-                                    |> BuildTask.mapError
-                                        (\e ->
-                                            FatalError.build
-                                                { title = "Test failed"
-                                                , body =
-                                                    [ "Testing of " ++ Elm.Package.toString elmJson.name ++ " failed for " ++ compiler
-                                                    , "Command was:\n  "
-                                                        ++ String.join " " (elmTestPath :: elmTestArgs compiler)
-                                                    , e
-                                                    , "--  " ++ Elm.Package.toString elmJson.name ++ ", " ++ compiler
-                                                    ]
-                                                        |> String.join "\n\n"
-                                                }
-                                        )
-                                    |> BuildTask.map (\r -> ( compiler, r ))
+        compilerOutputsTask : BuildTask FatalError (List ( String, String ))
+        compilerOutputsTask =
+            compilerVersions
+                |> List.map
+                    (\compiler ->
+                        BuildTask.Unsafe.commandInWritableDirectoryOutputWith
+                            (CommandOptions.default
+                                |> CommandOptions.withOutput Stream.MergeStderrAndStdout
+                                |> CommandOptions.allowNon0Status
                             )
-                        |> BuildTask.combine
-            in
-            BuildTask.do compilerOutputsTask <| \compilerOutputs ->
-            case List.Extra.uniqueBy Tuple.second compilerOutputs of
-                [] ->
-                    "No compiler outputs"
-                        |> FatalError.fromString
-                        |> BuildTask.fail
+                            elmTestPath
+                            (elmTestArgs compiler)
+                            downloaded
+                            |> BuildTask.withEnv [ ( "ELM_HOME", pwd ++ "/elm-homes/" ++ compiler ) ]
+                            |> BuildTask.withMemoryLimitInGB 2
+                            |> BuildTask.withIdlePriority
+                            -- |> BuildTask.withDebug Debug.todo
+                            |> BuildTask.mapError
+                                (\e ->
+                                    case e.recoverable of
+                                        Stream.StreamError internal ->
+                                            "Command failed with an internal stream error: " ++ internal
 
-                ( c1, r1 ) :: ( c2, r2 ) :: _ ->
-                    let
-                        body : String
-                        body =
-                            Diff.diffLinesWith Diff.defaultOptions
-                                (formatJson r1)
-                                (formatJson r2)
-                                |> Diff.ToString.diffToString { context = 3, color = True }
-                    in
-                    FatalError.build
-                        { title =
-                            Elm.Package.toString elmJson.name
-                                ++ "@"
-                                ++ Version.toString elmJson.version
-                                ++ " Difference between "
-                                ++ c1
-                                ++ " and "
-                                ++ c2
-                        , body = body
-                        }
-                        |> BuildTask.fail
+                                        Stream.CustomError _ body ->
+                                            Maybe.withDefault "<no body>" body
+                                )
+                            |> BuildTask.andThen
+                                (\r ->
+                                    if String.contains "\"duration\"" r then
+                                        r
+                                            |> String.lines
+                                            |> List.Extra.removeWhen String.isEmpty
+                                            |> List.Extra.last
+                                            |> Maybe.withDefault r
+                                            |> replaceDuration
+                                            |> BuildTask.succeed
 
-                [ _ ] ->
-                    { filename =
-                        Path.path
-                            (String.join "/"
-                                [ Elm.Package.toString elmJson.name
-                                , Version.toString elmJson.version
-                                ]
-                            )
-                    , hash = downloaded
-                    }
-                        |> Just
-                        |> BuildTask.succeed
+                                    else
+                                        formatError r
+                                            |> BuildTask.succeed
+                                )
+                            |> BuildTask.mapError
+                                (\e ->
+                                    FatalError.build
+                                        { title = "Test failed"
+                                        , body =
+                                            [ "Testing of " ++ Elm.Package.toString elmJson.name ++ " failed for " ++ compiler
+                                            , "Command was:\n  "
+                                                ++ String.join " " (elmTestPath :: elmTestArgs compiler)
+                                            , e
+                                            , "--  " ++ Elm.Package.toString elmJson.name ++ ", " ++ compiler
+                                            ]
+                                                |> String.join "\n\n"
+                                        }
+                                )
+                            |> BuildTask.map (\r -> ( compiler, r ))
+                    )
+                |> BuildTask.combine
+    in
+    BuildTask.do compilerOutputsTask <| \compilerOutputs ->
+    checkCompilerOutputs (Dict.fromList compilerOutputs)
+        |> BuildTask.succeed
+
+
+checkCompilerOutputs : Dict String String -> CheckResult
+checkCompilerOutputs compilerOutputs =
+    case compilerOutputs |> Dict.toList |> List.Extra.uniqueBy Tuple.second of
+        [] ->
+            NoCompilerOutputs
+
+        ( compiler1, output1 ) :: ( compiler2, output2 ) :: _ ->
+            DifferentOutput
+                { compiler1 = compiler1
+                , compiler2 = compiler2
+                , diff =
+                    Diff.diffLinesWith Diff.defaultOptions
+                        (formatJson output1)
+                        (formatJson output2)
+                        |> Diff.ToString.diffToString { context = 3, color = True }
+                }
+
+        [ _ ] ->
+            AllOutputsAreTheSame
 
 
 formatError : String -> String
@@ -458,14 +395,9 @@ pwdTask =
         |> BuildTask.allowFatal
 
 
-replaceDuration : String -> BuildTask Json.Decode.Error String
+replaceDuration : String -> String
 replaceDuration s =
-    case Json.Decode.decodeString Json.Decode.value s of
-        Err e ->
-            BuildTask.fail e
-
-        Ok _ ->
-            BuildTask.succeed (Regex.replace durationRegex (\_ -> "\"duration\": \"---\"") s)
+    Regex.replace durationRegex (\_ -> "\"duration\": \"---\"") s
 
 
 durationRegex : Regex
