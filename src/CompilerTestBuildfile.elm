@@ -38,6 +38,7 @@ import Regex exposing (Regex)
 import Result.Extra
 import Url.Builder
 import Utils
+import XBytes
 
 
 type alias Package =
@@ -132,14 +133,21 @@ buildAction { missing, packages } =
                 list
                     |> Maybe.Extra.values
                     |> List.map formatChecksOutput
-                    |> (::) "Author;Package;Version;Result;Compiler 1;Compiler 2;Output 1;Output 2"
-                    |> String.join "\n"
+                    |> (::) [ "Author", "Package", "Version", "Result", "Compiler 1", "Compiler 2", "Output 1", "Output 2" ]
+                    |> toExcelFile
                     |> BuildTask.writeFile
                     |> BuildTask.allowFatal
             )
 
 
-formatChecksOutput : ( Package, CheckResult ) -> String
+toExcelFile : List (List String) -> String
+toExcelFile cells =
+    cells
+        |> List.map (List.map Utils.escape >> String.join "\t")
+        |> String.join "\n"
+
+
+formatChecksOutput : ( Package, CheckResult ) -> List String
 formatChecksOutput ( package, checkResult ) =
     let
         ( result, specific ) =
@@ -162,15 +170,12 @@ formatChecksOutput ( package, checkResult ) =
                 NoCompilerOutputs ->
                     ( "Internal error - no outputs", [] )
     in
-    ([ package.author
-     , package.name
-     , package.version
-     , result
-     ]
+    [ package.author
+    , package.name
+    , package.version
+    , result
+    ]
         ++ specific
-    )
-        |> List.map Utils.escape
-        |> String.join ";"
 
 
 handlePackage : Package -> BuildTask FatalError CheckResult
@@ -458,7 +463,7 @@ formatJson f =
                             let
                                 rowString : String
                                 rowString =
-                                    String.padLeft 8 '0' (Hex.toString (rowIndex * 0x10))
+                                    String.padLeft 8 '0' (Hex.fromWord32 (rowIndex * 0x10))
 
                                 hexes : String
                                 hexes =
@@ -473,9 +478,10 @@ formatJson f =
                                         |> List.map
                                             (\hex ->
                                                 hex
-                                                    |> Hex.fromString
-                                                    |> Result.toMaybe
-                                                    |> Maybe.map Char.fromCode
+                                                    |> XBytes.fromHex
+                                                    |> Maybe.andThen XBytes.toText
+                                                    |> Maybe.andThen String.uncons
+                                                    |> Maybe.map Tuple.first
                                                     |> Maybe.Extra.filter isPrintable
                                                     |> Maybe.withDefault '.'
                                             )
