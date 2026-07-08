@@ -300,12 +300,14 @@ runTestsForPackage elmJson downloaded =
                                             FatalError.build
                                                 { title = "Test failed"
                                                 , body =
-                                                    "Compilation of "
-                                                        ++ Elm.Package.toString elmJson.name
-                                                        ++ " failed for "
+                                                    [ "Testing of " ++ Elm.Package.toString elmJson.name ++ " failed for " ++ compiler
+                                                    , "Command was:\n  "
+                                                        ++ elmTestPath
+                                                        ++ " --report json --seed 123456789 --compiler "
                                                         ++ compiler
-                                                        ++ "\n\n"
-                                                        ++ e
+                                                    , e
+                                                    ]
+                                                        |> String.join "\n\n"
                                                 }
                                         )
                                     |> BuildTask.map (\r -> ( compiler, r ))
