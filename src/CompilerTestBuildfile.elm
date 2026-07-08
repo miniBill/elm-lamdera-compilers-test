@@ -1,5 +1,7 @@
 module CompilerTestBuildfile exposing (Inputs, Package, buildAction, getInput)
 
+import Ansi.Color
+import Ansi.Font
 import BackendTask exposing (BackendTask)
 import BackendTask.File as File
 import BackendTask.Http as Http
@@ -284,24 +286,35 @@ runTestsForPackage elmJson downloaded =
                                         )
                                     |> BuildTask.andThen
                                         (\r ->
-                                            r
-                                                |> String.lines
-                                                |> List.Extra.removeWhen String.isEmpty
-                                                |> List.Extra.last
-                                                |> Maybe.withDefault r
-                                                |> BuildTask.succeed
-                                         -- |> replaceDuration
-                                         -- |> BuildTask.mapError
-                                         --     (\e ->
-                                         --         FatalError.build
-                                         --             { title =
-                                         --                 "Compilation of "
-                                         --                     ++ Elm.Package.toString elmJson.name
-                                         --                     ++ " failed for "
-                                         --                     ++ compiler
-                                         --             , body = Json.Decode.errorToString e
-                                         --             }
-                                         --     )
+                                            if String.contains "\"duration\"" r then
+                                                r
+                                                    |> String.lines
+                                                    |> List.Extra.removeWhen String.isEmpty
+                                                    |> List.Extra.last
+                                                    |> Maybe.withDefault r
+                                                    |> replaceDuration
+                                                    |> BuildTask.mapError
+                                                        (\e ->
+                                                            FatalError.build
+                                                                { title =
+                                                                    "Compilation of "
+                                                                        ++ Elm.Package.toString elmJson.name
+                                                                        ++ " failed for "
+                                                                        ++ compiler
+                                                                , body = Json.Decode.errorToString e
+                                                                }
+                                                        )
+
+                                            else
+                                                FatalError.build
+                                                    { title =
+                                                        "Compilation of "
+                                                            ++ Elm.Package.toString elmJson.name
+                                                            ++ " failed for "
+                                                            ++ compiler
+                                                    , body = formatError r
+                                                    }
+                                                    |> BuildTask.fail
                                         )
                                     |> BuildTask.map (\r -> ( compiler, r ))
                             )
@@ -348,6 +361,101 @@ runTestsForPackage elmJson downloaded =
                     }
                         |> Just
                         |> BuildTask.succeed
+
+
+formatError : String -> String
+formatError s =
+    case Json.Decode.decodeString errorDecoder s of
+        Err e ->
+            s ++ "\nAdditionally, formatting failed because:\n" ++ Json.Decode.errorToString e
+
+        Ok { path, title, message } ->
+            [ Ansi.Color.fontColor Ansi.Color.cyan ("-- " ++ title ++ " --------------- " ++ path)
+            , formatErrorMessage message
+            ]
+                |> String.join "\n"
+
+
+formatErrorMessage : List ErrorMessageFragment -> String
+formatErrorMessage fragment =
+    fragment
+        |> List.map formatErrorMessageFragment
+        |> String.concat
+
+
+formatErrorMessageFragment : ErrorMessageFragment -> String
+formatErrorMessageFragment fragment =
+    case fragment of
+        Text text ->
+            text
+
+        Formatted { bold, underline, color, string } ->
+            string
+                |> (if bold then
+                        Ansi.Font.bold
+
+                    else
+                        identity
+                   )
+                |> (if underline then
+                        Ansi.Font.underline
+
+                    else
+                        identity
+                   )
+                |> Ansi.Color.fontColor color
+
+
+type ErrorMessageFragment
+    = Text String
+    | Formatted { bold : Bool, underline : Bool, color : Ansi.Color.Color, string : String }
+
+
+errorDecoder : Json.Decode.Decoder { path : String, title : String, message : List ErrorMessageFragment }
+errorDecoder =
+    let
+        const : Json.Decode.Decoder a -> (a -> Json.Encode.Value) -> a -> v -> Json.Decode.Decoder v
+        const dec enc exp val =
+            dec
+                |> Json.Decode.andThen
+                    (\r ->
+                        if r == exp then
+                            Json.Decode.succeed val
+
+                        else
+                            Json.Decode.fail ("Expected " ++ Json.Encode.encode 0 (enc exp))
+                    )
+
+        messageFragment : Json.Decode.Decoder ErrorMessageFragment
+        messageFragment =
+            Json.Decode.oneOf
+                [ Json.Decode.map Text Json.Decode.string
+                , Json.Decode.map4
+                    (\bold underline color string ->
+                        Formatted
+                            { bold = bold
+                            , underline = underline
+                            , color = color
+                            , string = string
+                            }
+                    )
+                    (Json.Decode.field "bold" Json.Decode.bool)
+                    (Json.Decode.field "underline" Json.Decode.bool)
+                    (Json.Decode.field "color"
+                        (Json.Decode.oneOf
+                            [ const Json.Decode.string Json.Encode.string "GREEN" Ansi.Color.Green
+                            , const Json.Decode.string Json.Encode.string "RED" Ansi.Color.Red
+                            ]
+                        )
+                    )
+                    (Json.Decode.field "string" Json.Decode.string)
+                ]
+    in
+    Json.Decode.map4 (\() path title message -> { path = path, title = title, message = message })
+        (Json.Decode.field "type" (const Json.Decode.string Json.Encode.string "error" ()))
+        (Json.Decode.field "path" Json.Decode.string)
+        (Json.Decode.field "title" Json.Decode.string)
+        (Json.Decode.field "message" (Json.Decode.list messageFragment))
 
 
 pwdTask : BuildTask FatalError String
