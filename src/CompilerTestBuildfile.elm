@@ -142,6 +142,9 @@ handlePackage package =
                     || ((package.author == "brandly")
                             && (package.name == "elm-dot-lang")
                        )
+                    || (package.name == "elm-speedcubing")
+                    || (package.name == "french-stemmer")
+                    || (package.name == "elm-cldr")
             then
                 { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
                 , hash = downloaded
