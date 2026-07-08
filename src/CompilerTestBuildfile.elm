@@ -139,14 +139,18 @@ handlePackage package =
                 |> BuildTask.withWarning e
 
         Ok ( downloaded, hasTests ) ->
+            let
+                packageString : String
+                packageString =
+                    package.author ++ "/" ++ package.name
+            in
             if
                 not hasTests
-                    || ((package.author == "brandly")
-                            && (package.name == "elm-dot-lang")
-                       )
+                    || (packageString == "brandly/elm-dot-lang")
                     || (package.name == "elm-speedcubing")
                     || (package.name == "french-stemmer")
                     || (package.name == "elm-cldr")
+                    || (packageString == "Ar3ON/elm-combox")
             then
                 { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
                 , hash = downloaded
@@ -261,6 +265,12 @@ runTestsForPackage elmJson downloaded =
                                     , "json"
                                     , "--seed"
                                     , "123456789"
+                                    , case elmTestVersion of
+                                        ElmTestV1 ->
+                                            ""
+
+                                        ElmTestV2 ->
+                                            "-vvv"
                                     , "--compiler"
                                     , compiler
                                     ]
@@ -327,29 +337,29 @@ runTestsForPackage elmJson downloaded =
                         |> FatalError.fromString
                         |> BuildTask.fail
 
-                -- ( c1, r1 ) :: ( c2, r2 ) :: _ ->
-                --     let
-                --         body : String
-                --         body =
-                --             Diff.diffLinesWith Diff.defaultOptions
-                --                 (formatJson r1)
-                --                 (formatJson r2)
-                --                 |> Diff.ToString.diffToString { context = 3, color = True }
-                --     in
-                --     FatalError.build
-                --         { title =
-                --             Elm.Package.toString elmJson.name
-                --                 ++ "@"
-                --                 ++ Version.toString elmJson.version
-                --                 ++ " Difference between "
-                --                 ++ c1
-                --                 ++ " and "
-                --                 ++ c2
-                --         , body = body
-                --         }
-                --         |> BuildTask.fail
-                -- [ _ ] ->
-                _ ->
+                ( c1, r1 ) :: ( c2, r2 ) :: _ ->
+                    let
+                        body : String
+                        body =
+                            Diff.diffLinesWith Diff.defaultOptions
+                                (formatJson r1)
+                                (formatJson r2)
+                                |> Diff.ToString.diffToString { context = 3, color = True }
+                    in
+                    FatalError.build
+                        { title =
+                            Elm.Package.toString elmJson.name
+                                ++ "@"
+                                ++ Version.toString elmJson.version
+                                ++ " Difference between "
+                                ++ c1
+                                ++ " and "
+                                ++ c2
+                        , body = body
+                        }
+                        |> BuildTask.fail
+
+                [ _ ] ->
                     { filename =
                         Path.path
                             (String.join "/"
