@@ -131,6 +131,20 @@ buildAction { missing, packages } =
         |> BuildTask.andThen (\_ -> BuildTask.writeFile "TODO" |> BuildTask.allowFatal)
 
 
+brokenPackages : List String
+brokenPackages =
+    [ "AR3ON/elm-combox"
+    , "Arkham/elm-rttl"
+    , "brandly/elm-dot-lang"
+    , "Confidenceman02/elm-animate-height"
+    , "Confidenceman02/elm-select" -- maybe not
+    , "FMFI-UK-1-AIN-412/elm-formula"
+    , "Gizra/elm-attribute-builder"
+    , "Herteby/enum"
+    , "IzumiSy/elm-firestore"
+    ]
+
+
 handlePackage : Package -> BuildTask FatalError (Maybe { filename : Path, hash : FileOrDirectory })
 handlePackage package =
     BuildTask.do (downloadPackage package) <| \downloadResult ->
@@ -145,18 +159,7 @@ handlePackage package =
                 packageString =
                     package.author ++ "/" ++ package.name
             in
-            if
-                not hasTests
-                    || List.member packageString
-                        [ "AR3ON/elm-combox"
-                        , "Arkham/elm-rttl"
-                        , "brandly/elm-dot-lang"
-                        , "Confidenceman02/elm-animate-height"
-                        , "Confidenceman02/elm-select" -- maybe not
-                        , "FMFI-UK-1-AIN-412/elm-formula"
-                        , "Gizra/elm-attribute-builder"
-                        ]
-            then
+            if not hasTests || List.member packageString brokenPackages then
                 { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
                 , hash = downloaded
                 }
