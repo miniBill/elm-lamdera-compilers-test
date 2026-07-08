@@ -20,6 +20,7 @@ import Elm.Constraint
 import Elm.Package
 import Elm.Project
 import Elm.Version as Version
+import FNV1a
 import FatalError exposing (FatalError)
 import Hash
 import Hex
@@ -264,7 +265,9 @@ runTestsForPackage elmJson downloaded =
                                     [ "--report"
                                     , "json"
                                     , "--seed"
-                                    , "123456789"
+                                    , Hash.toString downloaded
+                                        |> FNV1a.hash
+                                        |> String.fromInt
                                     , "--compiler"
                                     , compiler
                                     ]
