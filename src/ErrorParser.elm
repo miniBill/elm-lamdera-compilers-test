@@ -7,7 +7,11 @@ import Json.Encode
 
 
 type ElmTestError
-    = Error { path : String, title : String, message : List ErrorMessageFragment }
+    = Error
+        { path : Maybe String
+        , title : String
+        , message : List ErrorMessageFragment
+        }
     | CompileErrors (List CompileError)
 
 
@@ -91,11 +95,11 @@ decodePosition =
         (Json.Decode.field "column" Json.Decode.int)
 
 
-errorDecoder : Json.Decode.Decoder { path : String, title : String, message : List ErrorMessageFragment }
+errorDecoder : Json.Decode.Decoder { path : Maybe String, title : String, message : List ErrorMessageFragment }
 errorDecoder =
     Json.Decode.map4 (\() path title message -> { path = path, title = title, message = message })
         (Json.Decode.field "type" (constDecoder Json.Decode.string Json.Encode.string "error" ()))
-        (Json.Decode.field "path" Json.Decode.string)
+        (Json.Decode.field "path" (Json.Decode.nullable Json.Decode.string))
         (Json.Decode.field "title" Json.Decode.string)
         (Json.Decode.field "message" (Json.Decode.list messageFragment))
 
@@ -145,7 +149,7 @@ formatElmTestError : ElmTestError -> String
 formatElmTestError parsed =
     case parsed of
         Error { path, title, message } ->
-            [ Ansi.Color.fontColor Ansi.Color.cyan ("-- " ++ title ++ " --------------- " ++ path)
+            [ Ansi.Color.fontColor Ansi.Color.cyan ("-- " ++ title ++ " --------------- " ++ Maybe.withDefault "" path)
             , formatErrorMessage message
             ]
                 |> String.join "\n"
@@ -189,12 +193,11 @@ formatErrorMessageFragment fragment =
                     else
                         identity
                    )
-                |> (if underline then
-                        Ansi.Font.underline
-
-                    else
-                        identity
-                   )
+                -- |> (if underline then
+                --         Ansi.Font.underline
+                --     else
+                --         identity
+                --    )
                 |> (case color of
                         Just c ->
                             Ansi.Color.fontColor c

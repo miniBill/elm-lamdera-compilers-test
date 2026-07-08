@@ -136,6 +136,8 @@ brokenPackages : List String
 brokenPackages =
     [ "AR3ON/elm-combox"
     , "Arkham/elm-rttl"
+    , "arowM/elm-parser-test"
+    , "arowM/elm-reference"
     , "brandly/elm-dot-lang"
     , "Confidenceman02/elm-animate-height"
     , "Confidenceman02/elm-select" -- maybe not
@@ -144,6 +146,21 @@ brokenPackages =
     , "Herteby/enum"
     , "IzumiSy/elm-firestore"
     , "JoshuaHall/elm-fraction"
+    , "MackeyRMS/elm-accessors"
+    , "MackeyRMS/elm-rosetree-path"
+    , "MartinSStewart/elm-audio"
+    , "NoRedInk/datetimepicker-legacy"
+    , "NoRedInk/elm-rails"
+    , "NoRedInk/noredink-ui"
+    , "Orasund/elm-hyperbolic"
+    , "Orasund/elm-ui-widgets"
+    , "Orasund/leaf-lang"
+    , "Orasund/pixelengine"
+    , "PaackEng/elm-datetime-picker"
+    , "robinheghan/elm-deque"
+    , "RomanErnst/erl"
+    , "SiriusStarr/elm-password-strength"
+    , "SiriusStarr/elm-review-no-unsorted"
     ]
 
 
@@ -191,6 +208,14 @@ handlePackage package =
 
                         else
                             runTestsForPackage elmJson downloaded
+                                |> BuildTask.toResult
+                                |> BuildTask.map
+                                    (\_ ->
+                                        { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
+                                        , hash = downloaded
+                                        }
+                                            |> Just
+                                    )
 
 
 isBrokenPackage : ( Elm.Package.Name, Elm.Constraint.Constraint ) -> Bool
@@ -307,6 +332,7 @@ runTestsForPackage elmJson downloaded =
                                     downloaded
                                     |> BuildTask.withEnv [ ( "ELM_HOME", pwd ++ "/elm-homes/" ++ compiler ) ]
                                     |> BuildTask.withMemoryLimitInGB 2
+                                    |> BuildTask.withIdlePriority
                                     -- |> BuildTask.withDebug Debug.todo
                                     |> BuildTask.mapError
                                         (\e ->
