@@ -287,7 +287,7 @@ innerRunTestsForPackage elmJson downloaded elmTestVersion =
                             (elmTestArgs compiler)
                             downloaded
                             |> BuildTask.withEnv [ ( "ELM_HOME", pwd ++ "/elm-homes/" ++ compiler ) ]
-                            |> BuildTask.withMemoryLimitInGB 2
+                            |> BuildTask.withMemoryLimitInGB 1
                             |> BuildTask.withIdlePriority
                             -- |> BuildTask.withDebug Debug.todo
                             |> BuildTask.mapError
