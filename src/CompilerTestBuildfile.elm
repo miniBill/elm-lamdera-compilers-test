@@ -273,20 +273,12 @@ runTestsForPackage elmJson downloaded =
                                     |> BuildTask.withMemoryLimitInGB 2
                                     |> BuildTask.mapError
                                         (\e ->
-                                            FatalError.build
-                                                { title =
-                                                    "Compilation of "
-                                                        ++ Elm.Package.toString elmJson.name
-                                                        ++ " failed for "
-                                                        ++ compiler
-                                                , body =
-                                                    case e.recoverable of
-                                                        Stream.StreamError internal ->
-                                                            "Command failed with an internal stream error: " ++ internal
+                                            case e.recoverable of
+                                                Stream.StreamError internal ->
+                                                    "Command failed with an internal stream error: " ++ internal
 
-                                                        Stream.CustomError _ body ->
-                                                            Maybe.withDefault "<no body>" body
-                                                }
+                                                Stream.CustomError _ body ->
+                                                    Maybe.withDefault "<no body>" body
                                         )
                                     |> BuildTask.andThen
                                         (\r ->
@@ -297,28 +289,24 @@ runTestsForPackage elmJson downloaded =
                                                     |> List.Extra.last
                                                     |> Maybe.withDefault r
                                                     |> replaceDuration
-                                                    |> BuildTask.mapError
-                                                        (\e ->
-                                                            FatalError.build
-                                                                { title =
-                                                                    "Compilation of "
-                                                                        ++ Elm.Package.toString elmJson.name
-                                                                        ++ " failed for "
-                                                                        ++ compiler
-                                                                , body = Json.Decode.errorToString e
-                                                                }
-                                                        )
+                                                    |> BuildTask.mapError Json.Decode.errorToString
 
                                             else
-                                                FatalError.build
-                                                    { title =
-                                                        "Compilation of "
-                                                            ++ Elm.Package.toString elmJson.name
-                                                            ++ " failed for "
-                                                            ++ compiler
-                                                    , body = formatError r
-                                                    }
+                                                formatError r
                                                     |> BuildTask.fail
+                                        )
+                                    |> BuildTask.mapError
+                                        (\e ->
+                                            FatalError.build
+                                                { title = "Test failed"
+                                                , body =
+                                                    "Compilation of "
+                                                        ++ Elm.Package.toString elmJson.name
+                                                        ++ " failed for "
+                                                        ++ compiler
+                                                        ++ "\n\n"
+                                                        ++ e
+                                                }
                                         )
                                     |> BuildTask.map (\r -> ( compiler, r ))
                             )
