@@ -147,12 +147,11 @@ handlePackage package =
             in
             if
                 not hasTests
-                    || (packageString == "brandly/elm-dot-lang")
-                    || (package.name == "elm-speedcubing")
-                    || (package.name == "french-stemmer")
-                    || (package.name == "elm-cldr")
-                    || (packageString == "AR3ON/elm-combox")
-                    || (packageString == "Arkham/elm-rttl")
+                    || List.member packageString
+                        [ "brandly/elm-dot-lang"
+                        , "AR3ON/elm-combox"
+                        , "Arkham/elm-rttl"
+                        ]
             then
                 { filename = Path.path (String.join "/" [ package.author, package.name, package.version ])
                 , hash = downloaded
