@@ -361,7 +361,26 @@ sheetToEntry sheetIndex sheetName sheet =
                                     [ ( "t", "inlineStr" ), ( "r", toReference rowIndex colIndex ) ]
                                     [ tag "is"
                                         []
-                                        [ tag "t" [] [ Xml.Encode.string cell ]
+                                        [ tag "t"
+                                            []
+                                            [ if String.any needsEscape cell then
+                                                cell
+                                                    |> String.toList
+                                                    |> List.concatMap
+                                                        (\c ->
+                                                            if needsEscape c then
+                                                                []
+
+                                                            else
+                                                                [ c ]
+                                                        )
+                                                    |> String.fromList
+                                                    |> Xml.Encode.string
+
+                                              else
+                                                cell
+                                                    |> Xml.Encode.string
+                                            ]
                                         ]
                                     ]
                             )
@@ -371,6 +390,21 @@ sheetToEntry sheetIndex sheetName sheet =
         ]
     ]
         |> xmlEntry ("xl/worksheets/sheet" ++ String.fromInt (sheetIndex + 1) ++ ".xml")
+
+
+needsEscape : Char -> Bool
+needsEscape c =
+    let
+        code : Int
+        code =
+            Char.toCode c
+    in
+    (code /= 0x09)
+        && (code /= 0x0A)
+        && (code /= 0x0D)
+        && (code < 0x20 || code > 0xD7FF)
+        && (code < 0xE000 || code > 0xFFFD)
+        && (code < 0x00010000 || code > 0x0010FFFF)
 
 
 toReference : Int -> Int -> String
