@@ -36,6 +36,7 @@ import Pages.Script as Script
 import Path exposing (Path)
 import Regex exposing (Regex)
 import Result.Extra
+import Set
 import Url.Builder
 import Utils
 import XBytes
@@ -134,7 +135,7 @@ buildAction { missing, packages } =
                 list
                     |> Maybe.Extra.values
                     |> List.map formatChecksOutput
-                    |> (::) [ "Author", "Package", "Version", "Result", "Compiler 1", "Compiler 2", "Output 1", "Output 2" ]
+                    |> (::) ([ "Author", "Package", "Version", "Result" ] ++ allCompilers)
                     |> Xlsx.workbookFromGrid "Results"
                     |> Xlsx.writeWorkbook
             )
@@ -143,30 +144,39 @@ buildAction { missing, packages } =
 formatChecksOutput : ( Package, CheckResult ) -> List String
 formatChecksOutput ( package, checkResult ) =
     let
-        ( result, specific ) =
+        specific : List String
+        specific =
             case checkResult of
-                AllOutputsAreTheSame ->
-                    ( "Pass", [] )
+                CompilerOutputs outputs ->
+                    let
+                        msg : String
+                        msg =
+                            case Set.size (Set.fromList (Dict.values outputs)) of
+                                0 ->
+                                    "Internal error - no outputs"
+
+                                1 ->
+                                    "Pass"
+
+                                _ ->
+                                    "Error - different outputs"
+                    in
+                    allCompilers
+                        |> List.map (\compiler -> Dict.get compiler outputs |> Maybe.withDefault "")
+                        |> (::) msg
 
                 NoTests ->
-                    ( "No tests", [] )
-
-                DifferentOutput diff ->
-                    ( "Error - different outputs", [ diff.compiler1, diff.compiler2, diff.output1, diff.output2 ] )
+                    [ "No tests" ]
 
                 DownloadFailed reason ->
-                    ( "Error - download failed", [ reason ] )
+                    [ "Error - download failed", reason ]
 
                 MissingElmExplorationsDependency ->
-                    ( "Error - no elm-explorations/test in the dependencies", [] )
-
-                NoCompilerOutputs ->
-                    ( "Internal error - no outputs", [] )
+                    [ "Error - no elm-explorations/test in the dependencies" ]
     in
     [ package.author
     , package.name
     , package.version
-    , result
     ]
         ++ specific
 
@@ -210,9 +220,7 @@ type ElmTestVersion
 
 
 type CheckResult
-    = NoCompilerOutputs
-    | DifferentOutput { compiler1 : String, compiler2 : String, output1 : String, output2 : String }
-    | AllOutputsAreTheSame
+    = CompilerOutputs (Dict String String)
     | NoTests
     | DownloadFailed String
     | MissingElmExplorationsDependency
@@ -258,6 +266,27 @@ runTestsForPackage elmJson downloaded =
                     |> BuildTask.fail
 
 
+compilerVersions : ElmTestVersion -> List String
+compilerVersions elmTestVersion =
+    case elmTestVersion of
+        ElmTestV1 ->
+            [ "elm-0.19.1"
+            , "lamdera-1.3.2"
+            ]
+
+        ElmTestV2 ->
+            allCompilers
+
+
+allCompilers : List String
+allCompilers =
+    [ "elm-0.19.1"
+    , "elm-0.19.2"
+    , "lamdera-1.3.2"
+    , "lamdera-1.4.0"
+    ]
+
+
 innerRunTestsForPackage :
     Elm.Project.PackageInfo
     -> FileOrDirectory
@@ -275,19 +304,6 @@ innerRunTestsForPackage elmJson downloaded elmTestVersion =
                 ElmTestV2 ->
                     "elm-test-rs"
 
-        compilerVersions : List String
-        compilerVersions =
-            case elmTestVersion of
-                ElmTestV1 ->
-                    [ "elm-0.19.1", "lamdera-1.3.2" ]
-
-                ElmTestV2 ->
-                    [ "elm-0.19.1"
-                    , "elm-0.19.2"
-                    , "lamdera-1.3.2"
-                    , "lamdera-1.4.0"
-                    ]
-
         elmTestArgs : String -> List String
         elmTestArgs compiler =
             [ "--report"
@@ -302,7 +318,7 @@ innerRunTestsForPackage elmJson downloaded elmTestVersion =
 
         compilerOutputsTask : BuildTask FatalError (List ( String, String ))
         compilerOutputsTask =
-            compilerVersions
+            compilerVersions elmTestVersion
                 |> List.map
                     (\compiler ->
                         BuildTask.Unsafe.commandInWritableDirectoryOutputWith
@@ -361,8 +377,7 @@ innerRunTestsForPackage elmJson downloaded elmTestVersion =
                 |> BuildTask.combine
     in
     BuildTask.do compilerOutputsTask <| \compilerOutputs ->
-    checkCompilerOutputs (Dict.fromList compilerOutputs)
-        |> BuildTask.succeed
+    BuildTask.succeed (CompilerOutputs (Dict.fromList compilerOutputs))
 
 
 pathRegex : Regex
@@ -374,24 +389,6 @@ pathRegex =
 cleanupPaths : String -> String
 cleanupPaths input =
     input |> Regex.replace pathRegex (\_ -> "")
-
-
-checkCompilerOutputs : Dict String String -> CheckResult
-checkCompilerOutputs compilerOutputs =
-    case compilerOutputs |> Dict.toList |> List.Extra.uniqueBy Tuple.second of
-        [] ->
-            NoCompilerOutputs
-
-        ( compiler1, output1 ) :: ( compiler2, output2 ) :: _ ->
-            DifferentOutput
-                { compiler1 = compiler1
-                , compiler2 = compiler2
-                , output1 = output1
-                , output2 = output2
-                }
-
-        [ _ ] ->
-            AllOutputsAreTheSame
 
 
 formatError : String -> String
