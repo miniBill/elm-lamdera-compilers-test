@@ -7,6 +7,7 @@ import Dict.Extra
 import FastDict as Dict exposing (Dict)
 import FatalError exposing (FatalError)
 import List.Extra
+import Regex exposing (Regex)
 import String.Extra
 import Time
 import Xml.Encode
@@ -374,30 +375,8 @@ rowToXml ( rowIndex, row ) =
 
 cellToXml : Int -> Int -> String -> Xml.Encode.Value
 cellToXml rowIndex colIndex cell =
-    let
-        cut : String
-        cut =
-            String.Extra.ellipsis 200 cell
-
-        clean : String
-        clean =
-            if String.any needsEscape cut then
-                cut
-                    |> String.toList
-                    |> List.filterMap
-                        (\c ->
-                            if needsEscape c then
-                                Nothing
-
-                            else
-                                Just c
-                        )
-                    |> String.fromList
-
-            else
-                cut
-    in
-    clean
+    cell
+        |> String.Extra.ellipsis 200
         |> Xml.Encode.string
         |> List.singleton
         |> tag "t" []
@@ -408,21 +387,6 @@ cellToXml rowIndex colIndex cell =
             [ ( "t", "inlineStr" )
             , ( "r", toReference rowIndex colIndex )
             ]
-
-
-needsEscape : Char -> Bool
-needsEscape c =
-    let
-        code : Int
-        code =
-            Char.toCode c
-    in
-    (code /= 0x09)
-        && (code /= 0x0A)
-        && (code /= 0x0D)
-        && (code < 0x20 || code > 0xD7FF)
-        && (code < 0xE000 || code > 0xFFFD)
-        && (code < 0x00010000 || code > 0x0010FFFF)
 
 
 toReference : Int -> Int -> String
@@ -449,7 +413,7 @@ xmlEntry path xml =
     ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
         ++ (xml
                 |> Xml.Encode.list
-                |> Xml.Encode.encode 2
+                |> xmlToString
            )
     )
         |> Bytes.Encode.string
@@ -459,3 +423,146 @@ xmlEntry path xml =
             , lastModified = ( Time.utc, Time.millisToPosix 0 )
             , comment = Nothing
             }
+
+
+xmlToString : Xml.Encode.Value -> String
+xmlToString value =
+    case value of
+        Xml.Encode.Tag name props nextValue ->
+            "<"
+                ++ name
+                ++ propsToString props
+                ++ ">"
+                ++ xmlToString nextValue
+                ++ "</"
+                ++ name
+                ++ ">"
+
+        Xml.Encode.StrNode str ->
+            encodeXmlEntities str
+
+        Xml.Encode.IntNode n ->
+            String.fromInt n
+
+        Xml.Encode.FloatNode n ->
+            String.fromFloat n
+
+        Xml.Encode.BoolNode True ->
+            "true"
+
+        Xml.Encode.BoolNode False ->
+            "false"
+
+        Xml.Encode.NullNode ->
+            ""
+
+        Xml.Encode.Object xs ->
+            List.map xmlToString xs
+                |> String.join "\n"
+
+        Xml.Encode.DocType name props ->
+            "<?"
+                ++ name
+                ++ propsToString props
+                ++ "?>"
+
+        Xml.Encode.CdataNode str ->
+            "<![CDATA[" ++ escapeCdataContent str ++ "]]>"
+
+
+needsEscaping : Regex
+needsEscaping =
+    Regex.fromString "[&\"'<>]"
+        |> Maybe.withDefault Regex.never
+
+
+needsReplacing : Regex
+needsReplacing =
+    Regex.fromString "[^\\x09\\x0a\\x0d\\x7f\\u0020-\\ud7ff\\ue000-\\ufffd]"
+        |> Maybe.withDefault Regex.never
+
+
+encodeXmlEntities : String -> String
+encodeXmlEntities s =
+    s
+        |> Regex.replace needsEscaping
+            (\{ match } ->
+                case match of
+                    "&" ->
+                        "&amp;"
+
+                    "\"" ->
+                        "&quot;"
+
+                    "'" ->
+                        "&apos;"
+
+                    "<" ->
+                        "&lt;"
+
+                    ">" ->
+                        "&gt;"
+
+                    _ ->
+                        -- Shouldn't happen
+                        toEntity match
+            )
+        |> Regex.replace needsReplacing
+            (\{ match } ->
+                -- These characters are never valid in unicode?
+                ""
+            )
+
+
+toEntity : String -> String
+toEntity match =
+    match
+        |> String.toList
+        |> List.map (\c -> "&#" ++ String.fromInt (Char.toCode c) ++ ";")
+        |> String.concat
+
+
+propsToString : CoreDict.Dict String Xml.Encode.Value -> String
+propsToString props =
+    if CoreDict.isEmpty props then
+        ""
+
+    else
+        CoreDict.foldl
+            (\key value acc -> acc ++ " " ++ key ++ "=" ++ "\"" ++ propToString value ++ "\"")
+            ""
+            props
+
+
+propToString : Xml.Encode.Value -> String
+propToString value =
+    case value of
+        Xml.Encode.StrNode str ->
+            encodeXmlEntities str
+
+        Xml.Encode.IntNode n ->
+            String.fromInt n
+
+        Xml.Encode.BoolNode True ->
+            "true"
+
+        Xml.Encode.BoolNode False ->
+            "false"
+
+        Xml.Encode.FloatNode f ->
+            String.fromFloat f
+
+        Xml.Encode.CdataNode str ->
+            -- CDATA should not be used in attributes, so escape it
+            encodeXmlEntities str
+
+        _ ->
+            ""
+
+
+{-| Escape CDATA content by splitting ]]> sequences
+-}
+escapeCdataContent : String -> String
+escapeCdataContent str =
+    -- Replace ]]> with ]]]]><![CDATA[> to properly escape it in CDATA
+    String.replace "]]>" "]]]]><![CDATA[>" str
