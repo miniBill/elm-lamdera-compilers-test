@@ -14,6 +14,8 @@ import BuildTask.Tar
 import BuildTask.Unsafe
 import Bytes.Encode
 import CommandOptions
+import Dict as CoreDict
+import Dict.Extra
 import Diff
 import Diff.ToString
 import Duration
@@ -132,11 +134,37 @@ buildAction { missing, packages } =
         |> BuildTask.combine
         |> BuildTask.andThen
             (\list ->
-                list
-                    |> Maybe.Extra.values
-                    |> List.map formatChecksOutput
-                    |> (::) ([ "Author", "Package", "Version", "Result" ] ++ allCompilers)
-                    |> Xlsx.workbookFromGrid "Results"
+                let
+                    resultsHeader : List String
+                    resultsHeader =
+                        "Author"
+                            :: "Package"
+                            :: "Version"
+                            :: "Result"
+                            :: allCompilers
+
+                    resultLines : List (List String)
+                    resultLines =
+                        list
+                            |> Maybe.Extra.values
+                            |> List.map formatChecksOutput
+
+                    summaryHeader =
+                        [ "Result", "Count" ]
+
+                    summaryLines : List (List String)
+                    summaryLines =
+                        resultLines
+                            |> List.filterMap (List.Extra.getAt 3)
+                            |> Dict.Extra.groupBy identity
+                            |> CoreDict.map (\k l -> [ k, String.fromInt (List.length l) ])
+                            |> CoreDict.values
+                in
+                [ ( "Results"
+                  , Xlsx.gridToSheet (resultsHeader :: resultLines)
+                  )
+                , ( "Summary", Xlsx.gridToSheet (summaryHeader :: summaryLines) )
+                ]
                     |> Xlsx.writeWorkbook
             )
 

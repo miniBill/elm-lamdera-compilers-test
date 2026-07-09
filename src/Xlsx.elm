@@ -1,4 +1,4 @@
-module Xlsx exposing (workbookFromGrid, writeWorkbook)
+module Xlsx exposing (gridToSheet, writeWorkbook)
 
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import Bytes.Encode
@@ -24,11 +24,6 @@ type alias Sheet =
 
 type alias Cell =
     String
-
-
-workbookFromGrid : String -> List (List String) -> Workbook
-workbookFromGrid sheet grid =
-    [ ( sheet, gridToSheet grid ) ]
 
 
 gridToSheet : List (List String) -> Sheet
