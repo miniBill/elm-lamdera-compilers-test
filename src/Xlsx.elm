@@ -79,8 +79,7 @@ tag name attrs children =
 
 contentTypesXml : Int -> Zip.Entry.Entry
 contentTypesXml size =
-    [ doctype { version = "1.0", encoding = "UTF-8", standalone = "yes" }
-    , tag "Types"
+    [ tag "Types"
         [ ( "xmlns", "http://schemas.openxmlformats.org/package/2006/content-types" ) ]
         ([ tag "Default"
             [ ( "Extension", "bin" )
@@ -124,8 +123,7 @@ contentTypesXml size =
 
 dotRels : Zip.Entry.Entry
 dotRels =
-    [ doctype { version = "1.0", encoding = "UTF-8", standalone = "yes" }
-    , tag "Relationships"
+    [ tag "Relationships"
         [ ( "xmlns", "http://schemas.openxmlformats.org/package/2006/relationships" ) ]
         [ tag "Relationship"
             [ ( "Id", "rId1" )
@@ -151,8 +149,7 @@ doctype data =
 
 workbookXml : Workbook -> Zip.Entry.Entry
 workbookXml workbook =
-    [ doctype { version = "1.0", encoding = "UTF-8", standalone = "yes" }
-    , tag "workbook"
+    [ tag "workbook"
         [ ( "xmlns", "http://schemas.openxmlformats.org/spreadsheetml/2006/main" )
         , ( "xmlns:r", "http://schemas.openxmlformats.org/officeDocument/2006/relationships" )
         ]
@@ -186,8 +183,7 @@ workbookXml workbook =
 
 workbookXmlRels : Int -> Zip.Entry.Entry
 workbookXmlRels size =
-    [ doctype { version = "1.0", encoding = "UTF-8", standalone = "yes" }
-    , tag "Relationships"
+    [ tag "Relationships"
         [ ( "xmlns", "http://schemas.openxmlformats.org/package/2006/relationships" ) ]
         -- [tag "Relationship"
         --   [ ( "Id", "rId1" )
@@ -212,8 +208,7 @@ workbookXmlRels size =
 
 style : Zip.Entry.Entry
 style =
-    [ doctype { version = "1.0", encoding = "UTF-8", standalone = "yes" }
-    , tag "styleSheet"
+    [ tag "styleSheet"
         [ ( "xmlns", "http://schemas.openxmlformats.org/spreadsheetml/2006/main" ) ]
         [ tag "numFmts" [] []
 
@@ -341,8 +336,7 @@ style =
 
 sheetToEntry : Int -> String -> Sheet -> Zip.Entry.Entry
 sheetToEntry sheetIndex sheetName sheet =
-    [ doctype { version = "1.0", encoding = "UTF-8", standalone = "yes" }
-    , tag "worksheet"
+    [ tag "worksheet"
         [ ( "xmlns", "http://schemas.openxmlformats.org/spreadsheetml/2006/main" ) ]
         [ tag "sheetViews"
             []
@@ -390,9 +384,12 @@ toReference rowIndex colIndex =
 
 xmlEntry : String -> List Xml.Encode.Value -> Zip.Entry.Entry
 xmlEntry path xml =
-    xml
-        |> Xml.Encode.list
-        |> Xml.Encode.encode 2
+    ("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>"
+        ++ (xml
+                |> Xml.Encode.list
+                |> Xml.Encode.encode 2
+           )
+    )
         |> Bytes.Encode.string
         |> Bytes.Encode.encode
         |> Zip.Entry.store
