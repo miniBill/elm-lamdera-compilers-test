@@ -39,6 +39,7 @@ import Result.Extra
 import Url.Builder
 import Utils
 import XBytes
+import Xlsx
 
 
 type alias Package =
@@ -134,17 +135,9 @@ buildAction { missing, packages } =
                     |> Maybe.Extra.values
                     |> List.map formatChecksOutput
                     |> (::) [ "Author", "Package", "Version", "Result", "Compiler 1", "Compiler 2", "Output 1", "Output 2" ]
-                    |> toExcelFile
-                    |> BuildTask.writeFile
-                    |> BuildTask.allowFatal
+                    |> Xlsx.fromGrid "Results"
+                    |> Xlsx.writeWorkbook
             )
-
-
-toExcelFile : List (List String) -> String
-toExcelFile cells =
-    cells
-        |> List.map (List.map Utils.escape >> String.join "\t")
-        |> String.join "\n"
 
 
 formatChecksOutput : ( Package, CheckResult ) -> List String

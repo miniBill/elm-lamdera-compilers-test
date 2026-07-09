@@ -4,6 +4,7 @@
         "start": "elm-pages run src/Main.elm --output ./out --build ../elm-lamdera-compilers-test-repos"
     },
     "devDependencies": {
+        "@types/node": "^26.1.1",
         "elm-pages": "^3.5.1",
         "elm-review": "^2.13.5",
         "elm-test": "0.19.1-revision9",

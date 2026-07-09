@@ -7,9 +7,11 @@
     "elm-version": "0.19.1",
     "dependencies": {
         "direct": {
+            "agu-z/elm-zip": "3.0.1",
             "billstclair/elm-sha256": "1.0.9",
             "dillonkearns/elm-cli-options-parser": "5.0.1",
             "dillonkearns/elm-pages": "12.3.0",
+            "dillonkearns/elm-xml-encode": "1.0.1",
             "elm/bytes": "1.0.8",
             "elm/core": "1.0.5",
             "elm/json": "1.1.4",
@@ -51,9 +53,11 @@
             "elm-community/dict-extra": "2.4.0",
             "elm-community/list-extra": "8.7.0",
             "elm-explorations/test": "2.2.1",
+            "folkertdev/elm-flate": "2.0.6",
             "fredcy/elm-parseint": "2.0.1",
             "jluckyiv/elm-utc-date-strings": "1.0.0",
             "justinmimbs/date": "4.1.0",
+            "justinmimbs/time-extra": "1.2.0",
             "miniBill/elm-codec": "2.3.1",
             "miniBill/elm-unicode": "1.1.2",
             "noahzgordon/elm-color-extra": "1.0.2",
