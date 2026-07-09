@@ -149,6 +149,7 @@ buildAction { missing, packages } =
                             |> Maybe.Extra.values
                             |> List.map formatChecksOutput
 
+                    summaryHeader : List String
                     summaryHeader =
                         [ "Result", "Count" ]
 
@@ -159,11 +160,15 @@ buildAction { missing, packages } =
                             |> Dict.Extra.groupBy identity
                             |> CoreDict.map (\k l -> [ k, String.fromInt (List.length l) ])
                             |> CoreDict.values
+
+                    summaryFooter : List (List String)
+                    summaryFooter =
+                        [ [ "Total", String.fromInt (List.length resultLines) ] ]
                 in
                 [ ( "Results"
                   , Xlsx.gridToSheet (resultsHeader :: resultLines)
                   )
-                , ( "Summary", Xlsx.gridToSheet (summaryHeader :: summaryLines) )
+                , ( "Summary", Xlsx.gridToSheet (summaryHeader :: summaryLines ++ summaryFooter) )
                 ]
                     |> Xlsx.writeWorkbook
             )
