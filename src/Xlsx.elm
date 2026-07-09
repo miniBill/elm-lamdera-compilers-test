@@ -194,7 +194,7 @@ workbookXmlRels size =
         (List.map
             (\i ->
                 tag "Relationship"
-                    [ ( "Id", "rId" ++ String.fromInt i )
+                    [ ( "Id", "rId" ++ String.fromInt (i + 1) )
                     , ( "Type", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" )
                     , ( "Target", "worksheets/sheet" ++ String.fromInt i ++ ".xml" )
                     ]
