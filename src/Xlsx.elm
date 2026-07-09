@@ -371,46 +371,59 @@ sheetToEntry sheetIndex sheetName sheet =
             |> Dict.toList
             |> Dict.Extra.groupBy (\( ( r, _ ), _ ) -> r)
             |> CoreDict.toList
-            |> List.map
-                (\( rowIndex, row ) ->
-                    row
-                        |> List.map
-                            (\( ( _, colIndex ), cell ) ->
-                                tag "c"
-                                    [ ( "t", "inlineStr" ), ( "r", toReference rowIndex colIndex ) ]
-                                    [ tag "is"
-                                        []
-                                        [ tag "t"
-                                            []
-                                            [ if String.any needsEscape cell then
-                                                cell
-                                                    |> String.Extra.ellipsis 200
-                                                    |> String.toList
-                                                    |> List.concatMap
-                                                        (\c ->
-                                                            if needsEscape c then
-                                                                []
-
-                                                            else
-                                                                [ c ]
-                                                        )
-                                                    |> String.fromList
-                                                    |> Xml.Encode.string
-
-                                              else
-                                                cell
-                                                    |> String.Extra.ellipsis 200
-                                                    |> Xml.Encode.string
-                                            ]
-                                        ]
-                                    ]
-                            )
-                        |> tag "row" [ ( "r", String.fromInt (rowIndex + 1) ) ]
-                )
+            |> List.map rowToXml
             |> tag "sheetData" []
         ]
     ]
         |> xmlEntry ("xl/worksheets/sheet" ++ String.fromInt (sheetIndex + 1) ++ ".xml")
+
+
+rowToXml : ( Int, List ( ( Int, Int ), String ) ) -> Xml.Encode.Value
+rowToXml ( rowIndex, row ) =
+    row
+        |> List.map
+            (\( ( _, colIndex ), cell ) ->
+                cellToXml rowIndex colIndex cell
+            )
+        |> tag "row" [ ( "r", String.fromInt (rowIndex + 1) ) ]
+
+
+cellToXml : Int -> Int -> String -> Xml.Encode.Value
+cellToXml rowIndex colIndex cell =
+    let
+        cut : String
+        cut =
+            String.Extra.ellipsis 200 cell
+
+        clean : String
+        clean =
+            if String.any needsEscape cut then
+                cut
+                    |> String.toList
+                    |> List.filterMap
+                        (\c ->
+                            if needsEscape c then
+                                Nothing
+
+                            else
+                                Just c
+                        )
+                    |> String.fromList
+
+            else
+                cut
+    in
+    clean
+        |> Xml.Encode.string
+        |> List.singleton
+        |> tag "t" []
+        |> List.singleton
+        |> tag "is" []
+        |> List.singleton
+        |> tag "c"
+            [ ( "t", "inlineStr" )
+            , ( "r", toReference rowIndex colIndex )
+            ]
 
 
 needsEscape : Char -> Bool
