@@ -347,7 +347,25 @@ sheetToEntry sheetIndex sheetName sheet =
                 []
             ]
 
-        -- , tag "cols" [] [ tag "col" [ ( "min", "1" ), ( "max", "1" ) ] [] ]
+        -- , let
+        --     colCount : Int
+        --     colCount =
+        --         sheet
+        --             |> Dict.keys
+        --             |> List.Extra.maximumBy Tuple.second
+        --             |> Maybe.map Tuple.second
+        --             |> Maybe.withDefault 0
+        --   in
+        --   List.range 1 colCount
+        --     |> List.map
+        --         (\i ->
+        --             tag "col"
+        --                 [ ( "min", String.fromInt i )
+        --                 , ( "max", String.fromInt i )
+        --                 ]
+        --                 []
+        --         )
+        --     |> tag "cols" []
         , sheet
             |> Dict.toList
             |> Dict.Extra.groupBy (\( ( r, _ ), _ ) -> r)
