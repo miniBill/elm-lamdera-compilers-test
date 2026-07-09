@@ -135,7 +135,7 @@ buildAction { missing, packages } =
                     |> Maybe.Extra.values
                     |> List.map formatChecksOutput
                     |> (::) [ "Author", "Package", "Version", "Result", "Compiler 1", "Compiler 2", "Output 1", "Output 2" ]
-                    |> Xlsx.fromGrid "Results"
+                    |> Xlsx.workbookFromGrid "Results"
                     |> Xlsx.writeWorkbook
             )
 

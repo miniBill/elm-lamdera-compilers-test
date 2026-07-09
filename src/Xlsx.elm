@@ -1,4 +1,4 @@
-module Xlsx exposing (fromGrid, writeWorkbook)
+module Xlsx exposing (workbookFromGrid, writeWorkbook)
 
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import Bytes.Encode
@@ -26,8 +26,8 @@ type alias Cell =
     String
 
 
-fromGrid : String -> List (List String) -> Workbook
-fromGrid sheet grid =
+workbookFromGrid : String -> List (List String) -> Workbook
+workbookFromGrid sheet grid =
     [ ( sheet, gridToSheet grid ) ]
 
 
@@ -135,17 +135,6 @@ dotRels =
         ]
     ]
         |> xmlEntry "_rels/.rels"
-
-
-doctype : { version : String, encoding : String, standalone : String } -> Xml.Encode.Value
-doctype data =
-    Xml.Encode.DocType "xml"
-        (CoreDict.fromList
-            [ ( "version", Xml.Encode.string data.version )
-            , ( "encoding", Xml.Encode.string data.encoding )
-            , ( "standalone", Xml.Encode.string data.standalone )
-            ]
-        )
 
 
 workbookXml : Workbook -> Zip.Entry.Entry
