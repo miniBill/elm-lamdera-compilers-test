@@ -7,6 +7,7 @@ import Dict.Extra
 import FastDict as Dict exposing (Dict)
 import FatalError exposing (FatalError)
 import List.Extra
+import String.Extra
 import Time
 import Xml.Encode
 import Zip exposing (Zip)
@@ -383,6 +384,7 @@ sheetToEntry sheetIndex sheetName sheet =
                                             []
                                             [ if String.any needsEscape cell then
                                                 cell
+                                                    |> String.Extra.ellipsis 200
                                                     |> String.toList
                                                     |> List.concatMap
                                                         (\c ->
@@ -397,6 +399,7 @@ sheetToEntry sheetIndex sheetName sheet =
 
                                               else
                                                 cell
+                                                    |> String.Extra.ellipsis 200
                                                     |> Xml.Encode.string
                                             ]
                                         ]
