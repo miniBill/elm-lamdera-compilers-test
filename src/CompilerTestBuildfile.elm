@@ -157,7 +157,7 @@ formatChecksOutput ( package, checkResult ) =
                 DownloadFailed reason ->
                     ( "Error - download failed", [ reason ] )
 
-                MissingElmExplorationsTestDependency ->
+                MissingElmExplorationsDependency ->
                     ( "Error - no elm-explorations/test in the dependencies", [] )
 
                 NoCompilerOutputs ->
@@ -215,7 +215,7 @@ type CheckResult
     | AllOutputsAreTheSame
     | NoTests
     | DownloadFailed String
-    | MissingElmExplorationsTestDependency
+    | MissingElmExplorationsDependency
 
 
 runTestsForPackage :
@@ -224,9 +224,16 @@ runTestsForPackage :
     -> BuildTask FatalError CheckResult
 runTestsForPackage elmJson downloaded =
     BuildTask.do pwdTask <| \pwd ->
-    case List.Extra.find (\( name, _ ) -> Just name == Elm.Package.fromString "elm-explorations/test") elmJson.testDeps of
+    let
+        elmTestDependency : Maybe ( Elm.Package.Name, Elm.Constraint.Constraint )
+        elmTestDependency =
+            (elmJson.testDeps ++ elmJson.deps)
+                |> List.Extra.find
+                    (\( name, _ ) -> Just name == Elm.Package.fromString "elm-explorations/test")
+    in
+    case elmTestDependency of
         Nothing ->
-            BuildTask.succeed MissingElmExplorationsTestDependency
+            BuildTask.succeed MissingElmExplorationsDependency
 
         Just ( _, elmTestConstraint ) ->
             let
