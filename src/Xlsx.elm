@@ -375,11 +375,21 @@ sheetToEntry sheetIndex sheetName sheet =
 
 toReference : Int -> Int -> String
 toReference rowIndex colIndex =
-    if colIndex < 26 then
-        String.fromChar (Char.fromCode (Char.toCode 'A' + colIndex)) ++ String.fromInt rowIndex
+    let
+        col : Int -> List Char -> String
+        col i acc =
+            let
+                here : Char
+                here =
+                    Char.fromCode (Char.toCode 'A' + modBy 26 i)
+            in
+            if i < 0 then
+                String.fromList acc
 
-    else
-        Debug.todo "toReference"
+            else
+                col (i // 26 - 1) (here :: acc)
+    in
+    col colIndex [] ++ String.fromInt (rowIndex + 1)
 
 
 xmlEntry : String -> List Xml.Encode.Value -> Zip.Entry.Entry
