@@ -165,9 +165,7 @@ buildAction { missing, packages } =
                     summaryFooter =
                         [ [ "Total", String.fromInt (List.length resultLines) ] ]
                 in
-                [ ( "Results"
-                  , Xlsx.gridToSheet (resultsHeader :: resultLines)
-                  )
+                [ ( "Results", Xlsx.gridToSheet (resultsHeader :: resultLines) )
                 , ( "Summary", Xlsx.gridToSheet (summaryHeader :: summaryLines ++ summaryFooter) )
                 ]
                     |> Xlsx.writeWorkbook
