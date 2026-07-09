@@ -349,13 +349,24 @@ innerRunTestsForPackage elmJson downloaded elmTestVersion =
                                                 |> String.join "\n\n"
                                         }
                                 )
-                            |> BuildTask.map (\r -> ( compiler, r ))
+                            |> BuildTask.map (\r -> ( compiler, cleanupPaths r ))
                     )
                 |> BuildTask.combine
     in
     BuildTask.do compilerOutputsTask <| \compilerOutputs ->
     checkCompilerOutputs (Dict.fromList compilerOutputs)
         |> BuildTask.succeed
+
+
+pathRegex : Regex
+pathRegex =
+    Regex.fromString "/[^ ]*/workspace-[0-9a-f]*/"
+        |> Maybe.withDefault Regex.never
+
+
+cleanupPaths : String -> String
+cleanupPaths input =
+    input |> Regex.replace pathRegex (\_ -> "")
 
 
 checkCompilerOutputs : Dict String String -> CheckResult
