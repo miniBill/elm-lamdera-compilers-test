@@ -136,13 +136,13 @@ buildAction { missing, packages } =
         |> BuildTask.andThen
             (\list ->
                 let
-                    resultsHeader : List ( String, Length )
+                    resultsHeader : List ( String, Maybe Float )
                     resultsHeader =
-                        ( "Author", Length.centimeters 3.77 )
-                            :: ( "Package", Length.centimeters 8.91 )
-                            :: ( "Version", Length.centimeters 2.05 )
-                            :: ( "Result", Length.centimeters 8.45 )
-                            :: List.map (\compiler -> ( compiler, Length.centimeters 16 )) allCompilers
+                        ( "Author", Nothing )
+                            :: ( "Package", Nothing )
+                            :: ( "Version", Nothing )
+                            :: ( "Result", Nothing )
+                            :: List.map (\compiler -> ( compiler, Just 32 )) allCompilers
 
                     resultLines : List (List String)
                     resultLines =
@@ -150,10 +150,10 @@ buildAction { missing, packages } =
                             |> Maybe.Extra.values
                             |> List.map formatChecksOutput
 
-                    summaryHeader : List ( String, Length )
+                    summaryHeader : List ( String, Maybe Float )
                     summaryHeader =
-                        [ ( "Result", Length.centimeters 8.45 )
-                        , ( "Count", Length.centimeters 1.23 )
+                        [ ( "Result", Nothing )
+                        , ( "Count", Nothing )
                         ]
 
                     summaryLines : List (List String)
@@ -169,12 +169,12 @@ buildAction { missing, packages } =
                         [ [ "Total", String.fromInt (List.length resultLines) ] ]
                 in
                 [ ( "Results"
-                  , Xlsx.gridToSheetWithColumns
+                  , Xlsx.gridToSheetWithColumnWidths
                         (List.map Tuple.second resultsHeader)
                         (List.map Tuple.first resultsHeader :: resultLines)
                   )
                 , ( "Summary"
-                  , Xlsx.gridToSheetWithColumns
+                  , Xlsx.gridToSheetWithColumnWidths
                         (List.map Tuple.second summaryHeader)
                         (List.map Tuple.first summaryHeader
                             :: summaryLines

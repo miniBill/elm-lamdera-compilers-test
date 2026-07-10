@@ -1,4 +1,4 @@
-module Xlsx exposing (gridToSheet, gridToSheetWithColumns, writeWorkbook)
+module Xlsx exposing (gridToSheet, gridToSheetWithColumnWidths, writeWorkbook)
 
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import Bytes.Encode
@@ -21,7 +21,7 @@ type alias Workbook =
 
 
 type alias Sheet =
-    { columns : Dict Int Length
+    { columns : Dict Int Float
     , rows : Dict Int (Dict Int Cell)
     }
 
@@ -32,7 +32,7 @@ type alias Cell =
 
 gridToSheet : List (List String) -> Sheet
 gridToSheet cells =
-    gridToSheetWithColumns [] cells
+    gridToSheetWithColumnWidths [] cells
 
 
 listToDict : List v -> Dict Int v
@@ -40,9 +40,25 @@ listToDict list =
     List.Extra.indexedFoldl Dict.insert Dict.empty list
 
 
-gridToSheetWithColumns : List Length -> List (List String) -> Sheet
-gridToSheetWithColumns widths cells =
-    { columns = listToDict widths
+{-| Convert a list of cells into a `Sheet`.
+
+The width is expressed as "the number of characters of the maximum digit width of the numbers 0, 1, 2, …, 9 as rendered in the normal style's font".
+
+-}
+gridToSheetWithColumnWidths : List (Maybe Float) -> List (List String) -> Sheet
+gridToSheetWithColumnWidths widths cells =
+    { columns =
+        List.Extra.indexedFoldl
+            (\i mv a ->
+                case mv of
+                    Nothing ->
+                        a
+
+                    Just v ->
+                        Dict.insert i v a
+            )
+            Dict.empty
+            widths
     , rows =
         cells
             |> List.map listToDict
@@ -347,19 +363,41 @@ sheetToEntry sheetIndex sheetName sheet =
                 ]
                 []
             ]
-        , sheet.columns
-            |> Dict.toList
-            |> List.map
-                (\( i, width ) ->
-                    tag "col"
-                        [ ( "min", String.fromInt (i + 1) )
-                        , ( "max", String.fromInt (i + 1) )
-                        , ( "customWidth", "true" )
-                        , ( "width", String.fromFloat (Length.inCentimeters width) )
+        , let
+            colCount : Int
+            colCount =
+                Dict.foldl
+                    (\_ row a ->
+                        case Dict.keys row |> List.maximum of
+                            Nothing ->
+                                a
 
-                        -- ,("bestFit","true")
-                        ]
-                        []
+                            Just k ->
+                                max (k + 1) a
+                    )
+                    0
+                    sheet.rows
+          in
+          List.range 1 colCount
+            |> List.map
+                (\i ->
+                    case Dict.get i sheet.columns of
+                        Just width ->
+                            tag "col"
+                                [ ( "min", String.fromInt (i + 1) )
+                                , ( "max", String.fromInt (i + 1) )
+                                , ( "customWidth", "true" )
+                                , ( "width", String.fromFloat width )
+                                ]
+                                []
+
+                        Nothing ->
+                            tag "col"
+                                [ ( "min", String.fromInt (i + 1) )
+                                , ( "max", String.fromInt (i + 1) )
+                                , ( "bestFit", "true" )
+                                ]
+                                []
                 )
             |> tag "cols" []
         , sheet.rows
