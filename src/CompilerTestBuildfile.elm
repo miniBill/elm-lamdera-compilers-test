@@ -150,6 +150,27 @@ buildAction { missing, packages } =
                         list
                             |> Maybe.Extra.values
                             |> List.map formatChecksOutput
+                            |> List.sortBy
+                                (\row ->
+                                    case List.Extra.getAt 3 row of
+                                        Just "Different outputs" ->
+                                            0
+
+                                        Just "Download failed" ->
+                                            1
+
+                                        Just "No elm-explorations/test in deps" ->
+                                            2
+
+                                        Just "No tests" ->
+                                            3
+
+                                        Just "Pass" ->
+                                            4
+
+                                        _ ->
+                                            -1
+                                )
 
                     summaryHeader : List ( String, Maybe Float )
                     summaryHeader =
