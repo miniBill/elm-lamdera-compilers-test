@@ -19,9 +19,9 @@ import Dict.Extra
 import Diff
 import Diff.ToString
 import Duration
-import Elm.Constraint
-import Elm.Package
-import Elm.Project
+import Elm.Constraint as Constraint exposing (Constraint)
+import Elm.Package as Package
+import Elm.Project as Project
 import Elm.Version as Version
 import ErrorParser
 import FNV1a
@@ -230,18 +230,18 @@ handlePackage package =
 
             else
                 Do.allowFatal (BuildTask.readFromDirectory downloaded "elm.json") <| \elmJsonString ->
-                case Json.Decode.decodeString Elm.Project.decoder elmJsonString of
+                case Json.Decode.decodeString Project.decoder elmJsonString of
                     Err e ->
                         Json.Decode.errorToString e
                             |> FatalError.fromString
                             |> BuildTask.fail
 
-                    Ok (Elm.Project.Application _) ->
+                    Ok (Project.Application _) ->
                         "Unexpected application-style elm.json"
                             |> FatalError.fromString
                             |> BuildTask.fail
 
-                    Ok (Elm.Project.Package elmJson) ->
+                    Ok (Project.Package elmJson) ->
                         runTestsForPackage elmJson downloaded
 
 
@@ -258,17 +258,17 @@ type CheckResult
 
 
 runTestsForPackage :
-    Elm.Project.PackageInfo
+    Project.PackageInfo
     -> FileOrDirectory
     -> BuildTask FatalError CheckResult
 runTestsForPackage elmJson downloaded =
     BuildTask.do pwdTask <| \pwd ->
     let
-        elmTestDependency : Maybe ( Elm.Package.Name, Elm.Constraint.Constraint )
+        elmTestDependency : Maybe ( Package.Name, Constraint )
         elmTestDependency =
             (elmJson.testDeps ++ elmJson.deps)
                 |> List.Extra.find
-                    (\( name, _ ) -> Just name == Elm.Package.fromString "elm-explorations/test")
+                    (\( name, _ ) -> Just name == Package.fromString "elm-explorations/test")
     in
     case elmTestDependency of
         Nothing ->
@@ -283,7 +283,7 @@ runTestsForPackage elmJson downloaded =
                             False
 
                         Just version ->
-                            Elm.Constraint.check version elmTestConstraint
+                            Constraint.check version elmTestConstraint
             in
             if List.any check [ "1.0.0", "1.1.0", "1.2.0", "1.2.1", "1.2.2" ] then
                 innerRunTestsForPackage elmJson downloaded ElmTestV1
@@ -292,7 +292,7 @@ runTestsForPackage elmJson downloaded =
                 innerRunTestsForPackage elmJson downloaded ElmTestV2
 
             else
-                ("Unrecognized elm-explorations/test version: " ++ Elm.Constraint.toString elmTestConstraint)
+                ("Unrecognized elm-explorations/test version: " ++ Constraint.toString elmTestConstraint)
                     |> FatalError.fromString
                     |> BuildTask.fail
 
@@ -319,7 +319,7 @@ allCompilers =
 
 
 innerRunTestsForPackage :
-    Elm.Project.PackageInfo
+    Project.PackageInfo
     -> FileOrDirectory
     -> ElmTestVersion
     -> BuildTask FatalError CheckResult
@@ -394,11 +394,11 @@ innerRunTestsForPackage elmJson downloaded elmTestVersion =
                                     FatalError.build
                                         { title = "Test failed"
                                         , body =
-                                            [ "Testing of " ++ Elm.Package.toString elmJson.name ++ " failed for " ++ compiler
+                                            [ "Testing of " ++ Package.toString elmJson.name ++ " failed for " ++ compiler
                                             , "Command was:\n  "
                                                 ++ String.join " " (elmTestPath :: elmTestArgs compiler)
                                             , e
-                                            , "--  " ++ Elm.Package.toString elmJson.name ++ ", " ++ compiler
+                                            , "--  " ++ Package.toString elmJson.name ++ ", " ++ compiler
                                             ]
                                                 |> String.join "\n\n"
                                         }
