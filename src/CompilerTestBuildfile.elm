@@ -478,24 +478,7 @@ innerRunTestsForPackage { pwd } elmJson downloaded elmTestVersion =
                             |> BuildTask.map
                                 (\r ->
                                     ( compiler
-                                    , let
-                                        withReplacedPaths : String
-                                        withReplacedPaths =
-                                            cleanupPaths r
-
-                                        -- Lamdera changes this error message a bit, but we don't care
-                                        key : String
-                                        key =
-                                            "But it came back as 404 Not Found"
-                                      in
-                                      case String.indexes key withReplacedPaths of
-                                        [ i ] ->
-                                            withReplacedPaths
-                                                |> String.left (i + String.length key)
-                                                |> String.trim
-
-                                        _ ->
-                                            String.trim withReplacedPaths
+                                    , normalizeCompilerOutput r
                                     )
                                 )
                     )
@@ -503,6 +486,36 @@ innerRunTestsForPackage { pwd } elmJson downloaded elmTestVersion =
     in
     BuildTask.do compilerOutputsTask <| \compilerOutputs ->
     BuildTask.succeed (CompilerOutputs (Dict.fromList compilerOutputs))
+
+
+normalizeCompilerOutput : String -> String
+normalizeCompilerOutput r =
+    r
+        |> cleanupPaths
+        |> simplify404Error
+        |> flattenVersion
+        |> String.trim
+
+
+flattenVersion : String -> String
+flattenVersion r =
+    String.replace "0.19.2" "0.19.1" r
+
+
+simplify404Error : String -> String
+simplify404Error r =
+    let
+        -- Lamdera changes this error message a bit, but we don't care
+        key : String
+        key =
+            "But it came back as 404 Not Found"
+    in
+    case String.indexes key r of
+        [ i ] ->
+            String.left (i + String.length key) r
+
+        _ ->
+            r
 
 
 pathRegex : Regex

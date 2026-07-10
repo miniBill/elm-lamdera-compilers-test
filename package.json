@@ -1,7 +1,7 @@
 {
     "license": "BSD-3-Clause",
     "scripts": {
-        "start": "elm-pages run src/Main.elm --output ./out --build ../elm-lamdera-compilers-test-repos",
+        "start": "elm-pages run src/Main.elm --output ./out --build ./build",
         "validate:ooxml-validator": "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1 bunx @xarsh/ooxml-validator out.xlsx",
         "validate:officeotron": "java -jar ~/Applications/officeotron-0.8.8.jar out.xlsx"
     },
