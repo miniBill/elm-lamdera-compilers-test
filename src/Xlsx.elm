@@ -1,4 +1,4 @@
-module Xlsx exposing (gridToSheet, writeWorkbook)
+module Xlsx exposing (gridToSheet, gridToSheetWithColumns, writeWorkbook)
 
 import BuildTask exposing (BuildTask, FileOrDirectory)
 import Bytes.Encode
@@ -6,6 +6,7 @@ import Dict as CoreDict
 import Dict.Extra
 import FastDict as Dict exposing (Dict)
 import FatalError exposing (FatalError)
+import Length exposing (Length)
 import List.Extra
 import Regex exposing (Regex)
 import String.Extra
@@ -20,7 +21,9 @@ type alias Workbook =
 
 
 type alias Sheet =
-    Dict ( Int, Int ) Cell
+    { columns : Dict Int Length
+    , rows : Dict Int (Dict Int Cell)
+    }
 
 
 type alias Cell =
@@ -29,10 +32,22 @@ type alias Cell =
 
 gridToSheet : List (List String) -> Sheet
 gridToSheet cells =
-    cells
-        |> List.indexedMap (\rowIndex row -> row |> List.indexedMap (\colIndex cell -> ( ( rowIndex, colIndex ), cell )))
-        |> List.concat
-        |> Dict.fromList
+    gridToSheetWithColumns [] cells
+
+
+listToDict : List v -> Dict Int v
+listToDict list =
+    List.Extra.indexedFoldl Dict.insert Dict.empty list
+
+
+gridToSheetWithColumns : List Length -> List (List String) -> Sheet
+gridToSheetWithColumns widths cells =
+    { columns = listToDict widths
+    , rows =
+        cells
+            |> List.map listToDict
+            |> listToDict
+    }
 
 
 writeWorkbook : Workbook -> BuildTask FatalError FileOrDirectory
@@ -332,30 +347,23 @@ sheetToEntry sheetIndex sheetName sheet =
                 ]
                 []
             ]
-
-        -- , let
-        --     colCount : Int
-        --     colCount =
-        --         sheet
-        --             |> Dict.keys
-        --             |> List.Extra.maximumBy Tuple.second
-        --             |> Maybe.map Tuple.second
-        --             |> Maybe.withDefault 0
-        --   in
-        --   List.range 1 colCount
-        --     |> List.map
-        --         (\i ->
-        --             tag "col"
-        --                 [ ( "min", String.fromInt i )
-        --                 , ( "max", String.fromInt i )
-        --                 ]
-        --                 []
-        --         )
-        --     |> tag "cols" []
-        , sheet
+        , sheet.columns
             |> Dict.toList
-            |> Dict.Extra.groupBy (\( ( r, _ ), _ ) -> r)
-            |> CoreDict.toList
+            |> List.map
+                (\( i, width ) ->
+                    tag "col"
+                        [ ( "min", String.fromInt (i + 1) )
+                        , ( "max", String.fromInt (i + 1) )
+                        , ( "customWidth", "true" )
+                        , ( "width", String.fromFloat (Length.inCentimeters width) )
+
+                        -- ,("bestFit","true")
+                        ]
+                        []
+                )
+            |> tag "cols" []
+        , sheet.rows
+            |> Dict.toList
             |> List.map rowToXml
             |> tag "sheetData" []
         ]
@@ -363,11 +371,12 @@ sheetToEntry sheetIndex sheetName sheet =
         |> xmlEntry ("xl/worksheets/sheet" ++ String.fromInt (sheetIndex + 1) ++ ".xml")
 
 
-rowToXml : ( Int, List ( ( Int, Int ), String ) ) -> Xml.Encode.Value
+rowToXml : ( Int, Dict Int String ) -> Xml.Encode.Value
 rowToXml ( rowIndex, row ) =
     row
+        |> Dict.toList
         |> List.map
-            (\( ( _, colIndex ), cell ) ->
+            (\( colIndex, cell ) ->
                 cellToXml rowIndex colIndex cell
             )
         |> tag "row" [ ( "r", String.fromInt (rowIndex + 1) ) ]

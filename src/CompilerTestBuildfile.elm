@@ -32,6 +32,7 @@ import Hex
 import Hex.Convert
 import Json.Decode
 import Json.Encode
+import Length exposing (Length)
 import List.Extra
 import Maybe.Extra
 import Pages.Script as Script
@@ -135,13 +136,13 @@ buildAction { missing, packages } =
         |> BuildTask.andThen
             (\list ->
                 let
-                    resultsHeader : List String
+                    resultsHeader : List ( String, Length )
                     resultsHeader =
-                        "Author"
-                            :: "Package"
-                            :: "Version"
-                            :: "Result"
-                            :: allCompilers
+                        ( "Author", Length.centimeters 3.77 )
+                            :: ( "Package", Length.centimeters 8.91 )
+                            :: ( "Version", Length.centimeters 2.05 )
+                            :: ( "Result", Length.centimeters 8.45 )
+                            :: List.map (\compiler -> ( compiler, Length.centimeters 16 )) allCompilers
 
                     resultLines : List (List String)
                     resultLines =
@@ -149,9 +150,11 @@ buildAction { missing, packages } =
                             |> Maybe.Extra.values
                             |> List.map formatChecksOutput
 
-                    summaryHeader : List String
+                    summaryHeader : List ( String, Length )
                     summaryHeader =
-                        [ "Result", "Count" ]
+                        [ ( "Result", Length.centimeters 8.45 )
+                        , ( "Count", Length.centimeters 1.23 )
+                        ]
 
                     summaryLines : List (List String)
                     summaryLines =
@@ -165,8 +168,19 @@ buildAction { missing, packages } =
                     summaryFooter =
                         [ [ "Total", String.fromInt (List.length resultLines) ] ]
                 in
-                [ ( "Results", Xlsx.gridToSheet (resultsHeader :: resultLines) )
-                , ( "Summary", Xlsx.gridToSheet (summaryHeader :: summaryLines ++ summaryFooter) )
+                [ ( "Results"
+                  , Xlsx.gridToSheetWithColumns
+                        (List.map Tuple.second resultsHeader)
+                        (List.map Tuple.first resultsHeader :: resultLines)
+                  )
+                , ( "Summary"
+                  , Xlsx.gridToSheetWithColumns
+                        (List.map Tuple.second summaryHeader)
+                        (List.map Tuple.first summaryHeader
+                            :: summaryLines
+                            ++ summaryFooter
+                        )
+                  )
                 ]
                     |> Xlsx.writeWorkbook
             )
