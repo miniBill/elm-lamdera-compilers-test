@@ -212,7 +212,7 @@ formatChecksOutput ( package, checkResult ) =
                             (\compiler ->
                                 Dict.get compiler outputs
                                     |> Maybe.withDefault ""
-                                    |> String.Extra.ellipsis 400
+                                    |> String.Extra.ellipsis 1000
                             )
                         |> (::) msg
 
@@ -423,7 +423,29 @@ innerRunTestsForPackage elmJson downloaded elmTestVersion =
                                                 |> String.join "\n\n"
                                         }
                                 )
-                            |> BuildTask.map (\r -> ( compiler, cleanupPaths r ))
+                            |> BuildTask.map
+                                (\r ->
+                                    ( compiler
+                                    , let
+                                        withReplacedPaths : String
+                                        withReplacedPaths =
+                                            cleanupPaths r
+
+                                        -- Lamdera changes this error message a bit, but we don't care
+                                        key : String
+                                        key =
+                                            "But it came back as 404 Not Found"
+                                      in
+                                      case String.indexes key withReplacedPaths of
+                                        [ i ] ->
+                                            withReplacedPaths
+                                                |> String.left (i + String.length key)
+                                                |> String.trim
+
+                                        _ ->
+                                            String.trim withReplacedPaths
+                                    )
+                                )
                     )
                 |> BuildTask.combine
     in
