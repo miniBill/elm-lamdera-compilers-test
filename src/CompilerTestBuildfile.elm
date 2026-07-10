@@ -344,6 +344,7 @@ compilerVersions elmTestVersion =
         ElmTestV1 ->
             [ "elm-0.19.1"
             , "lamdera-1.3.2"
+            , "lamdera-1.4.0"
             ]
 
         ElmTestV2 ->
