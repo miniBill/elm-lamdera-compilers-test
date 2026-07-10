@@ -423,7 +423,6 @@ rowToXml ( rowIndex, row ) =
 cellToXml : Int -> Int -> String -> Xml.Encode.Value
 cellToXml rowIndex colIndex cell =
     cell
-        |> String.Extra.ellipsis 200
         |> Xml.Encode.string
         |> List.singleton
         |> tag "t" []

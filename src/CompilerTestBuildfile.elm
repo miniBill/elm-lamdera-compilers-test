@@ -40,6 +40,7 @@ import Path exposing (Path)
 import Regex exposing (Regex)
 import Result.Extra
 import Set
+import String.Extra
 import Url.Builder
 import Utils
 import XBytes
@@ -207,7 +208,12 @@ formatChecksOutput ( package, checkResult ) =
                                     "Different outputs"
                     in
                     allCompilers
-                        |> List.map (\compiler -> Dict.get compiler outputs |> Maybe.withDefault "")
+                        |> List.map
+                            (\compiler ->
+                                Dict.get compiler outputs
+                                    |> Maybe.withDefault ""
+                                    |> String.Extra.ellipsis 400
+                            )
                         |> (::) msg
 
                 NoTests ->
