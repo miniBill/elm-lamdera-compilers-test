@@ -138,11 +138,11 @@ buildAction { missing, packages } =
                 let
                     resultsHeader : List ( String, Maybe Float )
                     resultsHeader =
-                        ( "Author", Nothing )
-                            :: ( "Package", Nothing )
-                            :: ( "Version", Nothing )
-                            :: ( "Result", Nothing )
-                            :: List.map (\compiler -> ( compiler, Just 32 )) allCompilers
+                        ( "Author", Just 19.24 )
+                            :: ( "Package", Just 30 )
+                            :: ( "Version", Just 10.48 )
+                            :: ( "Result", Just 27.59 )
+                            :: List.map (\compiler -> ( compiler, Just 70 )) allCompilers
 
                     resultLines : List (List String)
                     resultLines =
@@ -152,8 +152,8 @@ buildAction { missing, packages } =
 
                     summaryHeader : List ( String, Maybe Float )
                     summaryHeader =
-                        [ ( "Result", Nothing )
-                        , ( "Count", Nothing )
+                        [ ( "Result", Just 27.59 )
+                        , ( "Count", Just 16 )
                         ]
 
                     summaryLines : List (List String)
@@ -204,7 +204,7 @@ formatChecksOutput ( package, checkResult ) =
                                     "Pass"
 
                                 _ ->
-                                    "Error - different outputs"
+                                    "Different outputs"
                     in
                     allCompilers
                         |> List.map (\compiler -> Dict.get compiler outputs |> Maybe.withDefault "")
@@ -214,10 +214,10 @@ formatChecksOutput ( package, checkResult ) =
                     [ "No tests" ]
 
                 DownloadFailed reason ->
-                    [ "Error - download failed", reason ]
+                    [ "Download failed", reason ]
 
                 MissingElmExplorationsDependency ->
-                    [ "Error - no elm-explorations/test in the dependencies" ]
+                    [ "No elm-explorations/test in deps" ]
     in
     [ package.author
     , package.name
