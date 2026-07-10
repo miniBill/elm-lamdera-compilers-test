@@ -114,7 +114,7 @@ toTask toConfig =
         let
             config : Config tools inputs
             config =
-                toConfig pwd
+                toConfig (String.trim pwd)
         in
         Do.do config.getInputs <| \inputs ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
