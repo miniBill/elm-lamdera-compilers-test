@@ -66,7 +66,7 @@ gridToSheetWithColumnWidths widths cells =
     }
 
 
-writeWorkbook : Workbook -> BuildTask FatalError FileOrDirectory
+writeWorkbook : Workbook -> BuildTask tools FatalError FileOrDirectory
 writeWorkbook workbook =
     workbook
         |> workbookToZip
@@ -425,7 +425,7 @@ cellToXml rowIndex colIndex cell =
     cell
         |> Xml.Encode.string
         |> List.singleton
-        |> tag "t" []
+        |> tag "t" [] 
         |> List.singleton
         |> tag "is" []
         |> List.singleton

@@ -24,14 +24,23 @@ run =
     Script.withCliOptions programConfig toTask
 
 
-programConfig : Program.Config (Config CompilerTestBuildfile.Inputs)
+programConfig : Program.Config (String -> Config CompilerTestBuildfile.Tools CompilerTestBuildfile.Inputs)
 programConfig =
     Program.config
         |> Program.add
             (OptionsParser.build
-                (Config
-                    CompilerTestBuildfile.getInput
-                    CompilerTestBuildfile.buildAction
+                (\buildDirectory outputName removeStale jobs debug keepFailed hashKind pwd ->
+                    Config
+                        (CompilerTestBuildfile.getTools pwd)
+                        CompilerTestBuildfile.getInput
+                        CompilerTestBuildfile.buildAction
+                        buildDirectory
+                        outputName
+                        removeStale
+                        jobs
+                        debug
+                        keepFailed
+                        hashKind
                 )
                 |> OptionsParser.with
                     (Option.optionalKeywordArg "build"
@@ -82,9 +91,10 @@ programConfig =
             )
 
 
-type alias Config inputs =
-    { getInputs : BackendTask FatalError inputs
-    , buildAction : inputs -> BuildTask FatalError FileOrDirectory
+type alias Config tools inputs =
+    { getTools : BuildTask () FatalError tools
+    , getInputs : BackendTask FatalError inputs
+    , buildAction : inputs -> BuildTask tools FatalError FileOrDirectory
     , buildDirectory : Path
     , outputName : Path
     , removeStale : Bool
@@ -95,11 +105,17 @@ type alias Config inputs =
     }
 
 
-toTask : Config inputs -> BackendTask FatalError ()
-toTask config =
+toTask : (String -> Config tools inputs) -> BackendTask FatalError ()
+toTask toConfig =
     BackendTask.Extra.profiling "main" <|
         Do.do BackendTask.Time.now <| \begin ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Getting inputs") <| \_ ->
+        Do.command "pwd" [] <| \pwd ->
+        let
+            config : Config tools inputs
+            config =
+                toConfig pwd
+        in
         Do.do config.getInputs <| \inputs ->
         Do.log (Ansi.Color.fontColor Ansi.Color.brightBlue "Processing inputs") <| \_ ->
         Do.exec "mkdir" [ "-p", Path.toString config.buildDirectory ] <| \_ ->
@@ -110,6 +126,7 @@ toTask config =
                 , debug = config.debug
                 , hashKind = config.hashKind
                 , keepFailed = config.keepFailed
+                , getTools = config.getTools
                 }
                 config.buildDirectory
                 (config.buildAction inputs)

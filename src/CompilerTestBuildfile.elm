@@ -1,4 +1,4 @@
-module CompilerTestBuildfile exposing (Inputs, Package, buildAction, getInput)
+module CompilerTestBuildfile exposing (Inputs, Package, Tools, buildAction, getInput, getTools)
 
 import Ansi.Color
 import Ansi.Font
@@ -6,7 +6,7 @@ import BackendTask exposing (BackendTask)
 import BackendTask.File as File
 import BackendTask.Http as Http
 import BackendTask.Stream as Stream
-import BuildTask exposing (BuildTask, FileOrDirectory)
+import BuildTask exposing (BuildTask, Command, FileOrDirectory)
 import BuildTask.Do as Do
 import BuildTask.Gzip
 import BuildTask.Internal as Internal
@@ -57,15 +57,26 @@ type alias Package =
 type alias Inputs =
     { missing : List Package
     , packages : List Package
+    , pwd : String
+    }
+
+
+type alias Tools =
+    { elm_test : Command
+    , elm_test_rs : Command
+    , gzip : Command
+    , tar : Command
+    , compilers : Dict String Command
     }
 
 
 getInput : BackendTask FatalError Inputs
 getInput =
-    BackendTask.map2
-        (\missing packages ->
+    BackendTask.map3
+        (\missing packages pwd ->
             { missing = missing
             , packages = packages
+            , pwd = String.trim pwd
             }
         )
         (File.rawFile "missing"
@@ -101,10 +112,11 @@ getInput =
             }
             |> BackendTask.allowFatal
         )
+        (Script.command "pwd" [])
 
 
-buildAction : Inputs -> BuildTask FatalError FileOrDirectory
-buildAction { missing, packages } =
+buildAction : Inputs -> BuildTask Tools FatalError FileOrDirectory
+buildAction { missing, packages, pwd } =
     let
         packagesCount : Int
         packagesCount =
@@ -129,7 +141,7 @@ buildAction { missing, packages } =
                                 ++ packageToString package
                                 ++ " "
                     in
-                    handlePackage package
+                    handlePackage { pwd = pwd } package
                         |> BuildTask.map (\r -> Just ( package, r ))
                         |> BuildTask.withPrefix prefix
             )
@@ -208,6 +220,25 @@ buildAction { missing, packages } =
             )
 
 
+getTools : String -> BuildTask () FatalError Tools
+getTools pwd =
+    BuildTask.succeed Tools
+        |> BuildTask.andMap (BuildTask.which (pwd ++ "/node_modules/.bin/elm-test"))
+        |> BuildTask.andMap (BuildTask.which "elm-test-rs")
+        |> BuildTask.andMap (BuildTask.which "pigz")
+        |> BuildTask.andMap (BuildTask.which "tar")
+        |> BuildTask.andMap
+            (allCompilers
+                |> List.map BuildTask.which
+                |> BuildTask.combine
+                |> BuildTask.map
+                    (List.foldl
+                        (\command acc -> Dict.insert command.name command acc)
+                        Dict.empty
+                    )
+            )
+
+
 formatChecksOutput : ( Package, CheckResult ) -> List String
 formatChecksOutput ( package, checkResult ) =
     let
@@ -253,8 +284,8 @@ formatChecksOutput ( package, checkResult ) =
         ++ specific
 
 
-handlePackage : Package -> BuildTask FatalError CheckResult
-handlePackage package =
+handlePackage : { pwd : String } -> Package -> BuildTask Tools FatalError CheckResult
+handlePackage pwd package =
     BuildTask.do (downloadPackage package) <| \downloadResult ->
     case downloadResult of
         Err e ->
@@ -283,7 +314,7 @@ handlePackage package =
                             |> BuildTask.fail
 
                     Ok (Project.Package elmJson) ->
-                        runTestsForPackage elmJson downloaded
+                        runTestsForPackage pwd elmJson downloaded
 
 
 type ElmTestVersion
@@ -298,12 +329,8 @@ type CheckResult
     | MissingElmExplorationsDependency
 
 
-runTestsForPackage :
-    Project.PackageInfo
-    -> FileOrDirectory
-    -> BuildTask FatalError CheckResult
-runTestsForPackage elmJson downloaded =
-    BuildTask.do pwdTask <| \pwd ->
+runTestsForPackage : { pwd : String } -> Project.PackageInfo -> FileOrDirectory -> BuildTask Tools FatalError CheckResult
+runTestsForPackage pwd elmJson downloaded =
     let
         elmTestDependency : Maybe ( Package.Name, Constraint )
         elmTestDependency =
@@ -327,10 +354,10 @@ runTestsForPackage elmJson downloaded =
                             Constraint.check version elmTestConstraint
             in
             if List.any check [ "1.0.0", "1.1.0", "1.2.0", "1.2.1", "1.2.2" ] then
-                innerRunTestsForPackage elmJson downloaded ElmTestV1
+                innerRunTestsForPackage pwd elmJson downloaded ElmTestV1
 
             else if List.any check [ "2.0.0", "2.0.1", "2.1.0", "2.1.1", "2.1.2", "2.2.0", "2.2.1" ] then
-                innerRunTestsForPackage elmJson downloaded ElmTestV2
+                innerRunTestsForPackage pwd elmJson downloaded ElmTestV2
 
             else
                 ("Unrecognized elm-explorations/test version: " ++ Constraint.toString elmTestConstraint)
@@ -345,6 +372,7 @@ compilerVersions elmTestVersion =
             [ "elm-0.19.1"
             , "lamdera-1.3.2"
             , "lamdera-1.4.0"
+            , "lamdera-next"
             ]
 
         ElmTestV2 ->
@@ -357,25 +385,26 @@ allCompilers =
     , "elm-0.19.2"
     , "lamdera-1.3.2"
     , "lamdera-1.4.0"
+    , "lamdera-next"
     ]
 
 
 innerRunTestsForPackage :
-    Project.PackageInfo
+    { pwd : String }
+    -> Project.PackageInfo
     -> FileOrDirectory
     -> ElmTestVersion
-    -> BuildTask FatalError CheckResult
-innerRunTestsForPackage elmJson downloaded elmTestVersion =
-    BuildTask.do pwdTask <| \pwd ->
+    -> BuildTask Tools FatalError CheckResult
+innerRunTestsForPackage { pwd } elmJson downloaded elmTestVersion =
     let
-        elmTestPath : String
+        elmTestPath : Tools -> Command
         elmTestPath =
             case elmTestVersion of
                 ElmTestV1 ->
-                    pwd ++ "/node_modules/.bin/elm-test"
+                    .elm_test
 
                 ElmTestV2 ->
-                    "elm-test-rs"
+                    .elm_test_rs
 
         elmTestArgs : String -> List String
         elmTestArgs compiler =
@@ -389,8 +418,9 @@ innerRunTestsForPackage elmJson downloaded elmTestVersion =
             , compiler
             ]
 
-        compilerOutputsTask : BuildTask FatalError (List ( String, String ))
+        compilerOutputsTask : BuildTask Tools FatalError (List ( String, String ))
         compilerOutputsTask =
+            BuildTask.do (BuildTask.getTool identity) <| \tools ->
             compilerVersions elmTestVersion
                 |> List.map
                     (\compiler ->
@@ -438,7 +468,7 @@ innerRunTestsForPackage elmJson downloaded elmTestVersion =
                                         , body =
                                             [ "Testing of " ++ Package.toString elmJson.name ++ " failed for " ++ compiler
                                             , "Command was:\n  "
-                                                ++ String.join " " (elmTestPath :: elmTestArgs compiler)
+                                                ++ String.join " " ((elmTestPath tools).name :: elmTestArgs compiler)
                                             , e
                                             , "--  " ++ Package.toString elmJson.name ++ ", " ++ compiler
                                             ]
@@ -498,31 +528,6 @@ formatError s =
 
             Ok parsed ->
                 ErrorParser.formatElmTestError parsed
-
-
-pwdTask : BuildTask FatalError String
-pwdTask =
-    (BuildTask.do (Internal.hashFromString "pwd") <| \outputHash ->
-    BuildTask.do
-        (Internal.derive "pwd"
-            outputHash
-            (\{ buildPath } target ->
-                Script.command "pwd" []
-                    |> BackendTask.andThen
-                        (\pwd ->
-                            Script.writeFile
-                                { path = Hash.toPathTemporary buildPath target
-                                , body = pwd
-                                }
-                                |> BackendTask.allowFatal
-                        )
-                    |> BackendTask.mapError Internal.InternalError
-            )
-        )
-    <| \pwdFile ->
-    BuildTask.withFile pwdFile (\pwd -> BuildTask.succeed (String.trim pwd))
-    )
-        |> BuildTask.allowFatal
 
 
 replaceDuration : String -> String
@@ -636,7 +641,7 @@ packageFromString raw =
             Err ("Could not split package author/name and version in " ++ escape raw)
 
 
-downloadPackage : Package -> BuildTask FatalError (Result String { downloaded : FileOrDirectory, hasTests : Bool })
+downloadPackage : Package -> BuildTask Tools FatalError (Result String { downloaded : FileOrDirectory, hasTests : Bool })
 downloadPackage package =
     let
         url : String
@@ -651,7 +656,7 @@ downloadPackage package =
                 ]
                 []
 
-        getRoot : List String -> BuildTask FatalError String
+        getRoot : List String -> BuildTask Tools FatalError String
         getRoot contents =
             case contents of
                 firstLine :: _ ->
