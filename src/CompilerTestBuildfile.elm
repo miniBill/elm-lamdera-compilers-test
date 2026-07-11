@@ -372,7 +372,7 @@ compilerVersions elmTestVersion =
             [ "elm-0.19.1"
             , "lamdera-1.3.2-no-wire"
             , "lamdera-1.4.0-no-wire"
-            , "lamdera-next"
+            , "lamdera-next-no-wire"
             ]
 
         ElmTestV2 ->
@@ -385,7 +385,7 @@ allCompilers =
     , "elm-0.19.2"
     , "lamdera-1.3.2-no-wire"
     , "lamdera-1.4.0-no-wire"
-    , "lamdera-next"
+    , "lamdera-next-no-wire"
     ]
 
 
