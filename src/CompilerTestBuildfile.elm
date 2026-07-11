@@ -370,8 +370,8 @@ compilerVersions elmTestVersion =
     case elmTestVersion of
         ElmTestV1 ->
             [ "elm-0.19.1"
-            , "lamdera-1.3.2"
-            , "lamdera-1.4.0"
+            , "lamdera-1.3.2-no-wire"
+            , "lamdera-1.4.0-no-wire"
             , "lamdera-next"
             ]
 
@@ -383,8 +383,8 @@ allCompilers : List String
 allCompilers =
     [ "elm-0.19.1"
     , "elm-0.19.2"
-    , "lamdera-1.3.2"
-    , "lamdera-1.4.0"
+    , "lamdera-1.3.2-no-wire"
+    , "lamdera-1.4.0-no-wire"
     , "lamdera-next"
     ]
 
@@ -488,18 +488,20 @@ innerRunTestsForPackage { pwd } elmJson downloaded elmTestVersion =
     BuildTask.succeed (CompilerOutputs (Dict.fromList compilerOutputs))
 
 
+pathRegex : Regex
+pathRegex =
+    Regex.fromString "/[^ ]*/workspace-[0-9a-f]*/"
+        |> Maybe.withDefault Regex.never
+
+
 normalizeCompilerOutput : String -> String
 normalizeCompilerOutput r =
     r
-        |> cleanupPaths
+        |> Regex.replace pathRegex (\_ -> "")
         |> simplify404Error
-        |> flattenVersion
+        |> String.replace "0.19.2" "0.19.1"
+        |> String.replace "lamdera" "elm"
         |> String.trim
-
-
-flattenVersion : String -> String
-flattenVersion r =
-    String.replace "0.19.2" "0.19.1" r
 
 
 simplify404Error : String -> String
@@ -516,17 +518,6 @@ simplify404Error r =
 
         _ ->
             r
-
-
-pathRegex : Regex
-pathRegex =
-    Regex.fromString "/[^ ]*/workspace-[0-9a-f]*/"
-        |> Maybe.withDefault Regex.never
-
-
-cleanupPaths : String -> String
-cleanupPaths input =
-    input |> Regex.replace pathRegex (\_ -> "")
 
 
 formatError : String -> String
